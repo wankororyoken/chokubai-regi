@@ -1,0 +1,206 @@
+/**
+ * 直売所レジ 同期用スクリプト（Google Apps Script）
+ *
+ * スプレッドシートの「拡張機能 → Apps Script」に貼り付けて使います。
+ * 1. setup を一度実行（シートと合言葉 TOKEN が作られます）
+ * 2. 「デプロイ → 新しいデプロイ → ウェブアプリ」
+ *    実行ユーザー: 自分 / アクセスできるユーザー: 全員
+ * 3. 表示された URL と、ログに出た合言葉をレジアプリの設定画面に入れる
+ */
+
+const SHEET_PRODUCTS = '商品マスタ';
+const SHEET_SALES = '売上';
+const SHEET_ITEMS = '売上明細';
+
+const PRODUCT_HEADERS = ['商品ID', '品名', '区分', '価格', '時価', 'よく使う価格', '表示順', '非表示', 'よく売れる'];
+const SALES_HEADERS = ['取引ID', '日時', '端末', '支払方法', '合計', '預かり', 'おつり', '取消', '受信日時', '修正日時'];
+const ITEM_HEADERS = ['取引ID', '日時', '端末', '支払方法', '商品ID', '品名', '単価', '数量', '小計', '取消'];
+
+/** 最初に一度だけ実行する */
+function setup() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  let products = ss.getSheetByName(SHEET_PRODUCTS);
+  if (!products) {
+    products = ss.insertSheet(SHEET_PRODUCTS);
+    products.getRange(1, 1, 1, PRODUCT_HEADERS.length).setValues([PRODUCT_HEADERS]).setFontWeight('bold');
+    const sample = [
+      ['', '卵 10個', '卵', 400, false, '', 1, false, true],
+      ['', '卵 6個', '卵', 250, false, '', 2, false, true],
+      ['', 'トマト', '野菜', 200, false, '', 3, false, true],
+      ['', 'きゅうり', '野菜', 150, false, '', 4, false, true],
+      ['', '大根', '野菜', '', true, '150,200,250,300', 5, false, true],
+      ['', '白菜', '野菜', '', true, '200,300,400', 6, false, false],
+      ['', 'いちごジャム', '加工品', 600, false, '', 7, false, false],
+    ];
+    products.getRange(2, 1, sample.length, sample[0].length).setValues(sample);
+    products.setFrozenRows(1);
+  }
+  // 入力ミスを防ぐための入力規則（500行分）
+  const rows = 500;
+  products.getRange(2, 5, rows, 1).insertCheckboxes();
+  products.getRange(2, 8, rows, 1).insertCheckboxes();
+  products.getRange(2, 9, rows, 1).insertCheckboxes();
+  products.getRange(2, 4, rows, 1).setDataValidation(
+    SpreadsheetApp.newDataValidation().requireNumberGreaterThanOrEqualTo(0).setAllowInvalid(false)
+      .setHelpText('価格は0以上の数字で入力してください（時価の商品は空欄でOK）').build());
+  products.getRange(2, 3, rows, 1).setDataValidation(
+    SpreadsheetApp.newDataValidation().requireValueInList(['野菜', '卵', '果物', '加工品', 'その他'], true)
+      .setAllowInvalid(true).build());
+
+  [[SHEET_SALES, SALES_HEADERS], [SHEET_ITEMS, ITEM_HEADERS]].forEach(([name, headers]) => {
+    if (!ss.getSheetByName(name)) {
+      const sh = ss.insertSheet(name);
+      sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+      sh.setFrozenRows(1);
+    }
+  });
+
+  const props = PropertiesService.getScriptProperties();
+  if (!props.getProperty('TOKEN')) {
+    props.setProperty('TOKEN', Utilities.getUuid().slice(0, 8));
+  }
+  Logger.log('合言葉 (TOKEN): ' + props.getProperty('TOKEN'));
+}
+
+/** ブラウザで URL を開いたときの動作確認用 */
+function doGet() {
+  return json({ ok: true, message: '直売所レジの同期先です。アプリの設定画面にこのURLを入れてください。' });
+}
+
+/** レジアプリからの同期リクエスト：売上を受け取り、商品マスタを返す */
+function doPost(e) {
+  let body;
+  try {
+    body = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return json({ ok: false, error: 'データの形式が正しくありません' });
+  }
+  const token = PropertiesService.getScriptProperties().getProperty('TOKEN');
+  if (!token || body.token !== token) {
+    return json({ ok: false, error: '合言葉が違います。設定画面を確認してください' });
+  }
+
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    return json({ ok: false, error: '混み合っています。少し待ってからもう一度同期してください' });
+  }
+  try {
+    const savedIds = saveSales(Array.isArray(body.sales) ? body.sales : []);
+    const products = readProducts();
+    return json({ ok: true, savedIds: savedIds, products: products });
+  } catch (err) {
+    return json({ ok: false, error: 'スプレッドシートの処理でエラーが出ました: ' + err.message });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * 売上を書き込む。
+ * 同じ取引IDがすでにあれば、その行を最新の内容で上書きし、売上明細も入れ替える（二重登録しない）。
+ * 修正・取消のどちらも「上書き」で反映される。
+ */
+function saveSales(sales) {
+  if (sales.length === 0) return [];
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const salesSheet = ss.getSheetByName(SHEET_SALES);
+  const itemSheet = ss.getSheetByName(SHEET_ITEMS);
+
+  const salesLast = salesSheet.getLastRow();
+  const existing = {};
+  if (salesLast > 1) {
+    salesSheet.getRange(2, 1, salesLast - 1, 1).getValues().forEach((r, i) => {
+      existing[String(r[0])] = i + 2;
+    });
+  }
+
+  const now = new Date();
+  const newSales = [];
+  const newItems = [];
+  const replacedIds = {};
+  const savedIds = [];
+
+  sales.forEach((s) => {
+    if (!s || !s.id) return;
+    const method = s.method === 'paypay' ? 'PayPay' : '現金';
+    const at = new Date(s.createdAt);
+    const edited = s.editedAt ? new Date(s.editedAt) : '';
+    const row = [s.id, at, s.device || '', method, s.total, s.received, s.change, !!s.voided, now, edited];
+    if (existing[s.id] > 0) {
+      salesSheet.getRange(existing[s.id], 1, 1, SALES_HEADERS.length).setValues([row]);
+      replacedIds[s.id] = true;
+    } else if (existing[s.id] === -1) {
+      // 同じ同期の中に同じ取引が2回入っていた場合は後のものだけ使う
+      for (let i = newSales.length - 1; i >= 0; i--) if (newSales[i][0] === s.id) newSales.splice(i, 1);
+      for (let i = newItems.length - 1; i >= 0; i--) if (newItems[i][0] === s.id) newItems.splice(i, 1);
+      newSales.push(row);
+    } else {
+      newSales.push(row);
+      existing[s.id] = -1;
+    }
+    (s.items || []).forEach((it) => {
+      newItems.push([s.id, at, s.device || '', method, it.productId || '', it.name, it.unitPrice, it.qty, it.subtotal, !!s.voided]);
+    });
+    savedIds.push(s.id);
+  });
+
+  // 上書きした取引の古い明細行を消す（下から消すと行番号がずれない）
+  if (Object.keys(replacedIds).length && itemSheet.getLastRow() > 1) {
+    const ids = itemSheet.getRange(2, 1, itemSheet.getLastRow() - 1, 1).getValues();
+    for (let i = ids.length - 1; i >= 0; i--) {
+      if (replacedIds[String(ids[i][0])]) itemSheet.deleteRow(i + 2);
+    }
+  }
+  if (newSales.length) {
+    salesSheet.getRange(salesSheet.getLastRow() + 1, 1, newSales.length, SALES_HEADERS.length).setValues(newSales);
+  }
+  if (newItems.length) {
+    itemSheet.getRange(itemSheet.getLastRow() + 1, 1, newItems.length, ITEM_HEADERS.length).setValues(newItems);
+  }
+  return savedIds;
+}
+
+/** 商品マスタを読み込む。商品IDが空の行には自動でIDを振る */
+function readProducts() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PRODUCTS);
+  const last = sheet.getLastRow();
+  if (last < 2) return [];
+  const values = sheet.getRange(2, 1, last - 1, PRODUCT_HEADERS.length).getValues();
+  const result = [];
+  let idChanged = false;
+
+  values.forEach((r, i) => {
+    const name = String(r[1]).trim();
+    if (!name) return;
+    if (!String(r[0]).trim()) {
+      r[0] = 'P' + Utilities.getUuid().slice(0, 8);
+      idChanged = true;
+    }
+    const presets = String(r[5])
+      .split(/[,、，\s]+/)
+      .map(Number)
+      .filter((n) => n > 0);
+    result.push({
+      id: String(r[0]).trim(),
+      name: name,
+      category: String(r[2]).trim() || 'その他',
+      price: Number(r[3]) || 0,
+      variable: r[4] === true,
+      presets: presets,
+      order: Number(r[6]) || i + 1,
+      // 「非表示」にチェックがある商品はレジに出さない（新しい行は空欄＝表示）
+      visible: r[7] !== true,
+      popular: r[8] === true,
+    });
+  });
+
+  if (idChanged) {
+    sheet.getRange(2, 1, values.length, 1).setValues(values.map((r) => [r[0]]));
+  }
+  return result;
+}
+
+function json(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+}
