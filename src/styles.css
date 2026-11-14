@@ -24,6 +24,9 @@
      ボタンや文字がぼかしの範囲に入らないよう、上端に無地の余白を取る */
   --top-space: max(8px, calc(env(safe-area-inset-top) * 1.75));
 }
+/* iPhone / iPad：ホーム画面から起動したときはステータスバーの下からが画面になるが、
+   その上端から約50pxもぼかされるため、最低でもその分の余白を取る */
+html.ios { --top-space: max(52px, calc(env(safe-area-inset-top) * 1.75)); }
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
 html { background: var(--surface); }
