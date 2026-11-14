@@ -6,9 +6,10 @@ type Props = {
   onBack: () => void;
   onSync: () => void;
   syncing: boolean;
+  onOpenProducts: () => void;
 };
 
-export function SettingsScreen({ onBack, onSync, syncing }: Props) {
+export function SettingsScreen({ onBack, onSync, syncing, onOpenProducts }: Props) {
   const [s, setS] = useState<Settings | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -32,6 +33,16 @@ export function SettingsScreen({ onBack, onSync, syncing }: Props) {
         <span />
       </div>
 
+      <div className="form">
+        <div>
+          <span className="label">商品の追加・価格の変更・並び替え</span>
+          <button type="button" className="btn btn-sub btn-wide" onClick={onOpenProducts}>
+            商品の管理 →
+          </button>
+        </div>
+      </div>
+
+      <h2 className="section-title">同期の設定</h2>
       <div className="form">
         <label>
           <span className="label">同期先URL（GASのWebアプリのURL）</span>
@@ -80,7 +91,7 @@ export function SettingsScreen({ onBack, onSync, syncing }: Props) {
       <div className="notes">
         <h2>使い方のメモ</h2>
         <ul>
-          <li>商品の追加・価格の変更はスプレッドシートの「商品マスタ」で行い、各タブレットで「同期」を押すと反映されます。</li>
+          <li>商品の追加・価格の変更は「商品の管理」かスプレッドシートの「商品マスタ」で行います。他の端末には「同期」を押すと反映されます。</li>
           <li>会計中に価格を変えたいときは、明細の「@価格 ✎」を押します（その会計だけの変更です）。</li>
           <li>電波がなくても会計できます。売上はタブレットに保存され、次に同期したときに送られます。</li>
           <li>「未送信」が残っている間は、ブラウザのデータ削除やアプリの削除をしないでください。</li>

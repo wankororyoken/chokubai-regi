@@ -101,3 +101,43 @@ function sanitizeProducts(raw: unknown): Product[] {
   });
   return out;
 }
+
+/**
+ * 「商品の管理」画面から商品を保存・削除する。
+ * スプレッドシートに書き込んだあと、最新の商品マスタを受け取ってこの端末にも反映する。
+ * 他の端末には、それぞれが次に同期したときに反映される。
+ */
+export async function saveProductsRemote(upserts: Product[], deletes: string[] = []): Promise<SyncResult> {
+  const settings = await loadSettings();
+  if (!settings.gasUrl) return { ok: false, message: '設定画面で同期先URLを登録してください' };
+  if (!navigator.onLine) return { ok: false, message: 'インターネットにつながっているときに保存できます' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45000);
+  try {
+    const res = await fetch(settings.gasUrl, {
+      method: 'POST',
+      body: JSON.stringify({ token: settings.token, action: 'saveProducts', upserts, deletes }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return { ok: false, message: `通信エラー (${res.status})` };
+    const data = await res.json();
+    if (!data.ok) return { ok: false, message: data.error ?? '保存できませんでした' };
+    // 古い GAS は商品の保存を知らずに普通の同期として返事をするので、ここで見分ける
+    if (!data.applied) {
+      return { ok: false, message: 'GASのスクリプトが古いため保存できません。最新のスクリプトに更新してください' };
+    }
+    const products = sanitizeProducts(data.products);
+    await db.transaction('rw', db.products, db.meta, async () => {
+      await db.products.clear();
+      await db.products.bulkPut(products);
+      await setMeta('lastMasterAt', new Date().toISOString());
+    });
+    return { ok: true, message: '保存しました（他の端末には次の同期で反映されます）' };
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') return { ok: false, message: '時間切れになりました。電波の良い場所でもう一度お試しください' };
+    return { ok: false, message: '保存できませんでした。電波と設定を確認してください' };
+  } finally {
+    clearTimeout(timer);
+  }
+}

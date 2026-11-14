@@ -3,6 +3,7 @@ import { db, getMeta } from './db';
 import { HistoryScreen } from './HistoryScreen';
 import { PaymentScreen } from './PaymentScreen';
 import { PriceDialog } from './PriceDialog';
+import { ProductsScreen } from './ProductsScreen';
 import { RegisterScreen } from './RegisterScreen';
 import { sampleProducts } from './sampleProducts';
 import { SettingsScreen } from './SettingsScreen';
@@ -11,7 +12,7 @@ import { loadSettings, syncNow } from './sync';
 import type { CartLine, PayMethod, Product, Sale } from './types';
 import { formatDateTime, formatTime, uid, yen } from './util';
 
-type Screen = 'register' | 'payment' | 'history' | 'summary' | 'settings';
+type Screen = 'register' | 'payment' | 'history' | 'summary' | 'settings' | 'products';
 
 type PriceTarget =
   | { kind: 'add'; product: Product }
@@ -365,8 +366,25 @@ export default function App() {
           <HistoryScreen onBack={() => setScreen('register')} onVoid={voidSale} onEdit={startEdit} />
         )}
         {screen === 'summary' && <SummaryScreen onBack={() => setScreen('register')} />}
+        {screen === 'products' && (
+          <ProductsScreen
+            products={products}
+            online={online}
+            onBack={() => setScreen('settings')}
+            onSaved={async () => {
+              await reloadProducts();
+              await refreshStatus();
+            }}
+            onMessage={(message, error) => showToast({ message, error })}
+          />
+        )}
         {screen === 'settings' && (
-          <SettingsScreen onBack={() => setScreen('register')} onSync={() => runSync(true)} syncing={syncing} />
+          <SettingsScreen
+            onBack={() => setScreen('register')}
+            onSync={() => runSync(true)}
+            syncing={syncing}
+            onOpenProducts={() => setScreen('products')}
+          />
         )}
       </main>
 

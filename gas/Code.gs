@@ -86,6 +86,11 @@ function doPost(e) {
     return json({ ok: false, error: '混み合っています。少し待ってからもう一度同期してください' });
   }
   try {
+    // アプリの「商品の管理」画面からの保存
+    if (body.action === 'saveProducts') {
+      saveProducts(Array.isArray(body.upserts) ? body.upserts : [], Array.isArray(body.deletes) ? body.deletes : []);
+      return json({ ok: true, applied: true, products: readProducts() });
+    }
     const savedIds = saveSales(Array.isArray(body.sales) ? body.sales : []);
     const products = readProducts();
     return json({ ok: true, savedIds: savedIds, products: products });
@@ -159,6 +164,54 @@ function saveSales(sales) {
     itemSheet.getRange(itemSheet.getLastRow() + 1, 1, newItems.length, ITEM_HEADERS.length).setValues(newItems);
   }
   return savedIds;
+}
+
+/**
+ * アプリから送られた商品を商品マスタに書き込む。
+ * 商品IDが一致する行だけを書き換えるので、スプレッドシートで直接編集した他の行はそのまま残る。
+ */
+function saveProducts(upserts, deletes) {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_PRODUCTS);
+  const last = sheet.getLastRow();
+  const rowOf = {};
+  if (last > 1) {
+    sheet.getRange(2, 1, last - 1, 1).getValues().forEach((r, i) => {
+      const id = String(r[0]).trim();
+      if (id) rowOf[id] = i + 2;
+    });
+  }
+
+  const appends = [];
+  upserts.forEach((p) => {
+    const name = String(p.name || '').trim();
+    const price = Number(p.price || 0);
+    if (!name || !isFinite(price) || price < 0) throw new Error('品名か価格が正しくない商品があります');
+    const id = String(p.id || '').trim() || 'P' + Utilities.getUuid().slice(0, 8);
+    const presets = (Array.isArray(p.presets) ? p.presets : []).map(Number).filter((n) => n > 0);
+    const row = [
+      id,
+      name,
+      String(p.category || '').trim() || 'その他',
+      p.variable && !price ? '' : Math.round(price),
+      !!p.variable,
+      presets.join(','),
+      Number(p.order) || 0,
+      p.visible === false,
+      !!p.popular,
+    ];
+    if (rowOf[id]) sheet.getRange(rowOf[id], 1, 1, row.length).setValues([row]);
+    else appends.push(row);
+  });
+  if (appends.length) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, appends.length, PRODUCT_HEADERS.length).setValues(appends);
+  }
+
+  // 削除は下の行から（行番号がずれないように）
+  deletes
+    .map((id) => rowOf[String(id)])
+    .filter((r) => r)
+    .sort((a, b) => b - a)
+    .forEach((r) => sheet.deleteRow(r));
 }
 
 /** 商品マスタを読み込む。商品IDが空の行には自動でIDを振る */
