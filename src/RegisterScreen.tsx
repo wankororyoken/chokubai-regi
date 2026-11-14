@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CartLine, Product } from './types';
+import { COMPACT_QUERY, useMediaQuery } from './useMediaQuery';
 import { categoryColor, yen } from './util';
 
 const POPULAR = '__popular__';
@@ -35,9 +36,35 @@ export function RegisterScreen(props: Props) {
   const total = cart.reduce((s, l) => s + l.unitPrice * l.qty, 0);
   const count = cart.reduce((s, l) => s + l.qty, 0);
 
+  // スマホでは明細を下のバーにまとめ、押すと全画面で開く
+  const compact = useMediaQuery(COMPACT_QUERY);
+  const [sheetOpen, setSheetOpen] = useState(() => !!props.editingLabel);
+  // 商品を追加したとき、下のバーを一瞬光らせて「入った」ことを伝える
+  const [flash, setFlash] = useState(false);
+  const prevCount = useRef(count);
+  useEffect(() => {
+    if (count > prevCount.current) {
+      setFlash(true);
+      const t = window.setTimeout(() => setFlash(false), 500);
+      prevCount.current = count;
+      return () => window.clearTimeout(t);
+    }
+    prevCount.current = count;
+  }, [count]);
+
+  const editBanner = props.editingLabel && (
+    <div className="edit-banner">
+      <span>✎ {props.editingLabel}</span>
+      <button type="button" className="btn btn-small" onClick={props.onCancelEdit}>
+        修正をやめる
+      </button>
+    </div>
+  );
+
   return (
-    <div className="register">
+    <div className={`register ${compact ? 'compact' : ''}`}>
       <section className="products-pane" aria-label="商品">
+        {compact && editBanner}
         <div className="tabs" role="tablist">
           {tabs.map((t) => (
             <button
@@ -71,17 +98,29 @@ export function RegisterScreen(props: Props) {
         </div>
       </section>
 
-      <section className="cart-pane" aria-label="お買い上げ">
-        {props.editingLabel && (
-          <div className="edit-banner">
-            <span>✎ {props.editingLabel}</span>
-            <button type="button" className="btn btn-small" onClick={props.onCancelEdit}>
-              修正をやめる
-            </button>
-          </div>
-        )}
+      {compact && !sheetOpen && (
+        <div className={`cart-bar ${flash ? 'flash' : ''}`}>
+          <button type="button" className="btn cart-bar-open" onClick={() => setSheetOpen(true)}>
+            <span className="cart-bar-count">{count}点 ▲ 明細</span>
+            <span className="cart-bar-total">{yen(total)}</span>
+          </button>
+          <button type="button" className="btn btn-go cart-bar-pay" onClick={props.onPay} disabled={cart.length === 0}>
+            {props.editingLabel ? '確認へ →' : '会計へ →'}
+          </button>
+        </div>
+      )}
+
+      {(!compact || sheetOpen) && (
+      <section className={`cart-pane ${compact ? 'cart-sheet' : ''}`} aria-label="お買い上げ">
+        {editBanner}
         <div className="cart-head">
-          <span>{props.editingLabel ? '修正後の内容' : 'お買い上げ'}</span>
+          {compact ? (
+            <button type="button" className="btn btn-small" onClick={() => setSheetOpen(false)}>
+              ▼ 商品を追加する
+            </button>
+          ) : (
+            <span>{props.editingLabel ? '修正後の内容' : 'お買い上げ'}</span>
+          )}
           {cart.length > 0 && !props.editingLabel && (
             <button type="button" className="btn btn-small" onClick={props.onClearAll}>
               🗑 全部取り消す
@@ -89,7 +128,9 @@ export function RegisterScreen(props: Props) {
           )}
         </div>
         <div className="cart-lines">
-          {cart.length === 0 && <p className="empty">左の商品を押すと、ここに追加されます</p>}
+          {cart.length === 0 && (
+            <p className="empty">{compact ? '「▼ 商品を追加する」から商品を追加してください' : '左の商品を押すと、ここに追加されます'}</p>
+          )}
           {cart.map((l) => (
             <div key={l.key} className="line">
               <div className="line-top">
@@ -143,6 +184,7 @@ export function RegisterScreen(props: Props) {
           </button>
         </div>
       </section>
+      )}
     </div>
   );
 }

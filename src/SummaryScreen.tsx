@@ -152,8 +152,8 @@ export function SummaryScreen({ onBack }: Props) {
               <th>品名</th>
               <th className="num">個数</th>
               <th className="num">金額</th>
-              <th className="num">うち現金</th>
-              <th className="num">うちPayPay</th>
+              <th className="num col-split">うち現金</th>
+              <th className="num col-split">うちPayPay</th>
             </tr>
           </thead>
           <tbody>
@@ -165,8 +165,8 @@ export function SummaryScreen({ onBack }: Props) {
                 </td>
                 <td className="num strong">{i.qty}個</td>
                 <td className="num strong">{yen(i.amount)}</td>
-                <td className="num">{yen(i.cashAmount)}</td>
-                <td className="num">{yen(i.paypayAmount)}</td>
+                <td className="num col-split">{yen(i.cashAmount)}</td>
+                <td className="num col-split">{yen(i.paypayAmount)}</td>
               </tr>
             ))}
           </tbody>
@@ -175,8 +175,8 @@ export function SummaryScreen({ onBack }: Props) {
               <td>合計</td>
               <td className="num">{items.reduce((n, i) => n + i.qty, 0)}個</td>
               <td className="num">{yen(cash + paypay)}</td>
-              <td className="num">{yen(cash)}</td>
-              <td className="num">{yen(paypay)}</td>
+              <td className="num col-split">{yen(cash)}</td>
+              <td className="num col-split">{yen(paypay)}</td>
             </tr>
           </tfoot>
         </table>

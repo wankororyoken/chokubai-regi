@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Keypad } from './Keypad';
+import { COMPACT_QUERY, useMediaQuery } from './useMediaQuery';
 import type { PayMethod } from './types';
 import { yen } from './util';
 
@@ -19,6 +20,7 @@ export function PaymentScreen({ total, initialMethod, initialReceived, editing, 
   const [method, setMethod] = useState<PayMethod>(initialMethod);
   const [received, setReceived] = useState(initialReceived ? String(initialReceived) : '');
   const receivedNum = Number(received || 0);
+  const compact = useMediaQuery(COMPACT_QUERY);
   const change = receivedNum - total;
   const short = method === 'cash' && (received === '' || change < 0);
 
@@ -53,10 +55,13 @@ export function PaymentScreen({ total, initialMethod, initialReceived, editing, 
 
         {method === 'cash' ? (
           <>
+            <div className="pay-amounts">
+            <div>
             <p className="label">受け取った金額</p>
             <div className="input-box input-active">
-              {received ? yen(receivedNum) : <span className="placeholder">右で入力 →</span>}
+              {received ? yen(receivedNum) : <span className="placeholder">{compact ? '下で入力 ↓' : '右で入力 →'}</span>}
               <span className="caret" />
+            </div>
             </div>
             {received === '' ? (
               <div className="change-box neutral">
@@ -74,6 +79,7 @@ export function PaymentScreen({ total, initialMethod, initialReceived, editing, 
                 <span className="change-num">あと {yen(-change)}</span>
               </div>
             )}
+            </div>
           </>
         ) : (
           <div className="paypay-note">
@@ -85,23 +91,12 @@ export function PaymentScreen({ total, initialMethod, initialReceived, editing, 
           </div>
         )}
 
-        <button
-          type="button"
-          className="btn btn-go btn-big"
-          disabled={short}
-          onClick={() => onComplete(method, method === 'cash' ? receivedNum : total)}
-        >
-          {completeLabel}
-        </button>
-        <button type="button" className="btn btn-sub btn-back" onClick={onBack}>
-          ← レジ画面に戻る
-        </button>
       </section>
 
       {method === 'cash' && (
         <section className="pay-right">
           <p className="label">2. 受け取った金額を入れる</p>
-          <p className="muted small">お札・ちょうどの時はワンタッチ</p>
+          <p className="muted small quick-hint">お札・ちょうどの時はワンタッチ</p>
           <div className="quick">
             <button type="button" className="btn quick-btn" onClick={() => setReceived(String(total))}>
               ちょうど
@@ -116,6 +111,21 @@ export function PaymentScreen({ total, initialMethod, initialReceived, editing, 
           <Keypad value={received} onChange={setReceived} />
         </section>
       )}
+
+      {/* 大きい画面では左の列の下、スマホでは画面の一番下に固定 */}
+      <div className="pay-actions">
+        <button
+          type="button"
+          className="btn btn-go btn-big"
+          disabled={short}
+          onClick={() => onComplete(method, method === 'cash' ? receivedNum : total)}
+        >
+          {completeLabel}
+        </button>
+        <button type="button" className="btn btn-sub btn-back" onClick={onBack}>
+          ← 戻る
+        </button>
+      </div>
     </div>
   );
 }
