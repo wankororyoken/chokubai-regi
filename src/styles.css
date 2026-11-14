@@ -20,14 +20,18 @@
   color: var(--text);
   background: var(--bg);
   -webkit-text-size-adjust: 100%;
+  /* iPhone（iOS 26 以降）は画面上端のステータスバー付近を「すりガラス」でぼかす。
+     ボタンや文字がぼかしの範囲に入らないよう、上端に無地の余白を取る */
+  --top-space: max(8px, calc(env(safe-area-inset-top) * 1.75));
 }
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
+html { background: var(--surface); }
 body { overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
 button, input { font: inherit; color: inherit; touch-action: manipulation; }
 input { -webkit-user-select: text; user-select: text; }
 
-.app { display: flex; flex-direction: column; height: 100dvh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.app { display: flex; flex-direction: column; height: 100dvh; background: var(--bg); padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); }
 .main { flex: 1; min-height: 0; }
 
 /* ボタン共通：太い枠＋下側の厚み。押すと沈む */
@@ -49,7 +53,7 @@ input { -webkit-user-select: text; user-select: text; }
 .btn-del-big { font-size: 18px; padding: 12px 18px; }
 
 /* ヘッダー */
-.header { display: flex; align-items: center; gap: 16px; padding: 8px 14px; background: var(--surface); border-bottom: 2px solid var(--line); flex-wrap: wrap; }
+.header { display: flex; align-items: center; gap: 16px; padding: var(--top-space) 14px 8px; background: var(--surface); border-bottom: 2px solid var(--line); flex-wrap: wrap; }
 .brand { font-weight: 700; font-size: 18px; }
 .status { display: flex; gap: 14px; flex-wrap: wrap; font-size: 14px; color: var(--text-2); flex: 1; }
 .st-online { color: var(--ok); font-weight: 700; }
@@ -95,7 +99,7 @@ input { -webkit-user-select: text; user-select: text; }
 .qb { width: 52px; height: 48px; font-size: 28px; font-weight: 700; display: flex; align-items: center; justify-content: center; background: var(--surface); padding: 0; }
 .qty-num { min-width: 32px; text-align: center; font-size: 24px; font-weight: 700; }
 .line-sub { font-size: 20px; font-weight: 700; }
-.cart-foot { padding: 12px 14px; border-top: 2px solid var(--line); }
+.cart-foot { padding: 12px 14px calc(12px + env(safe-area-inset-bottom)); border-top: 2px solid var(--line); }
 .total-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
 .total { font-size: 36px; font-weight: 700; }
 
@@ -108,7 +112,7 @@ input { -webkit-user-select: text; user-select: text; }
 .pay-left, .pay-right { padding: 18px 22px; display: flex; flex-direction: column; gap: 6px; }
 .pay-left { grid-area: left; border-right: 2px solid var(--line); padding-bottom: 0; }
 .pay-right { grid-area: right; }
-.pay-actions { grid-area: actions; display: flex; flex-direction: column; padding: 4px 22px 18px; border-right: 2px solid var(--line); }
+.pay-actions { grid-area: actions; display: flex; flex-direction: column; padding: 4px 22px calc(18px + env(safe-area-inset-bottom)); border-right: 2px solid var(--line); }
 .pay-total { font-size: 48px; font-weight: 700; margin: 0 0 8px; }
 .methods { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px; }
 .method { font-size: 22px; padding: 14px 0; background: var(--surface); }
@@ -154,7 +158,7 @@ input { -webkit-user-select: text; user-select: text; }
 .toast-error { background: var(--danger); }
 
 /* 履歴・設定 */
-.page { height: 100%; overflow-y: auto; padding: 14px 18px 40px; max-width: 980px; margin: 0 auto; }
+.page { height: 100%; overflow-y: auto; padding: 14px 18px calc(40px + env(safe-area-inset-bottom)); max-width: 980px; margin: 0 auto; }
 .page-head { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; margin-bottom: 12px; }
 .page-head h1 { font-size: 22px; text-align: center; margin: 0; }
 .day-nav { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 20px; }
@@ -212,7 +216,7 @@ input { -webkit-user-select: text; user-select: text; }
 
 /* ===== スマホ（縦・横）向け。useMediaQuery.ts の COMPACT_QUERY と同じ条件 ===== */
 @media (max-width: 600px), (max-height: 500px) {
-  .header { padding: 6px 10px; gap: 4px 8px; }
+  .header { padding: var(--top-space) 10px 6px; gap: 4px 8px; }
   .brand { display: none; }
   .status { order: 2; flex-basis: 100%; font-size: 12px; gap: 8px; }
   .header-actions { margin-left: auto; gap: 6px; }
@@ -237,7 +241,7 @@ input { -webkit-user-select: text; user-select: text; }
   .cart-bar-total { font-size: 24px; font-weight: 700; white-space: nowrap; }
   .cart-bar-pay { font-size: 19px; padding: 0 18px; }
 
-  .cart-sheet { position: fixed; inset: 0; z-index: 5; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .cart-sheet { position: fixed; inset: 0; z-index: 5; padding: var(--top-space) env(safe-area-inset-right) 0 env(safe-area-inset-left); }
   .cart-sheet .edit-banner { margin: 0; border-radius: 0; border-width: 0 0 2px; }
   .cart-head { padding: 8px 10px; }
   .cart-lines { padding: 0 10px; }
@@ -280,7 +284,7 @@ input { -webkit-user-select: text; user-select: text; }
   .dialog-actions { margin-top: 10px; }
 
   /* 履歴・集計・設定 */
-  .page { padding: 10px 10px 32px; }
+  .page { padding: 10px 10px calc(32px + env(safe-area-inset-bottom)); }
   .page-head { gap: 6px; }
   .page-head h1 { font-size: 18px; }
   .page .btn-sub { font-size: 15px; padding: 7px 10px; }
