@@ -8,7 +8,12 @@ export function useMediaQuery(query: string) {
     const onChange = () => setMatch(mql.matches);
     onChange();
     mql.addEventListener('change', onChange);
-    return () => mql.removeEventListener('change', onChange);
+    // 端末によっては回転時に change が届かないことがあるので、画面サイズの変化でも確認する
+    window.addEventListener('resize', onChange);
+    return () => {
+      mql.removeEventListener('change', onChange);
+      window.removeEventListener('resize', onChange);
+    };
   }, [query]);
   return match;
 }

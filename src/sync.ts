@@ -1,5 +1,5 @@
 import { db, getMeta, setMeta } from './db';
-import type { Product, Sale, Settings } from './types';
+import type { Product, Sale, Settings, SummaryData } from './types';
 
 export const defaultSettings: Settings = { gasUrl: '', token: '', deviceName: 'レジ1' };
 
@@ -137,6 +137,50 @@ export async function saveProductsRemote(upserts: Product[], deletes: string[] =
   } catch (e) {
     if ((e as Error).name === 'AbortError') return { ok: false, message: '時間切れになりました。電波の良い場所でもう一度お試しください' };
     return { ok: false, message: '保存できませんでした。電波と設定を確認してください' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export type RemoteSummary = { data: SummaryData; fetchedAt: string };
+
+/** 全端末の集計を、取得した日時と一緒にこの端末に保存しておく（オフラインでも前回の結果を見られるように） */
+const summaryKey = (start: Date) => `summary:${start.toISOString()}`;
+
+export async function loadSavedSummary(start: Date, end: Date): Promise<RemoteSummary | null> {
+  const saved = await getMeta<(RemoteSummary & { end: string }) | null>(summaryKey(start), null);
+  return saved && saved.end === end.toISOString() ? saved : null;
+}
+
+/** 集計画面の「全端末の売上を取得」ボタン：GAS に期間を渡して、スプレッドシート上の全端末の売上を集計してもらう */
+export async function fetchSummaryRemote(
+  start: Date,
+  end: Date,
+): Promise<{ ok: true; summary: RemoteSummary } | { ok: false; message: string }> {
+  const settings = await loadSettings();
+  if (!settings.gasUrl) return { ok: false, message: '設定画面で同期先URLを登録してください' };
+  if (!navigator.onLine) return { ok: false, message: 'インターネットにつながっているときに取得できます' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45000);
+  try {
+    const res = await fetch(settings.gasUrl, {
+      method: 'POST',
+      body: JSON.stringify({ token: settings.token, action: 'summary', start: start.toISOString(), end: end.toISOString() }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return { ok: false, message: `通信エラー (${res.status})` };
+    const data = await res.json();
+    if (!data.ok) return { ok: false, message: data.error ?? '取得できませんでした' };
+    if (!data.applied || !data.summary) {
+      return { ok: false, message: 'GASのスクリプトが古いため取得できません。最新のスクリプトに更新してください' };
+    }
+    const summary: RemoteSummary = { data: data.summary as SummaryData, fetchedAt: new Date().toISOString() };
+    await setMeta(summaryKey(start), { ...summary, end: end.toISOString() });
+    return { ok: true, summary };
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') return { ok: false, message: '時間切れになりました。電波の良い場所でもう一度お試しください' };
+    return { ok: false, message: '取得できませんでした。電波と設定を確認してください' };
   } finally {
     clearTimeout(timer);
   }

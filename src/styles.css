@@ -239,6 +239,16 @@ input { -webkit-user-select: text; user-select: text; }
 .danger-zone { margin-top: 24px; padding: 14px 16px; border: 2px solid var(--danger); border-radius: 12px; background: var(--surface); }
 .danger-zone p { margin: 0 0 10px; }
 
+/* 集計：この端末／全端末 */
+.scope-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.scope-switch .choice { font-size: 19px; padding: 10px 0; }
+.fetch-panel { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; background: var(--surface); border: 2px solid var(--accent); border-radius: 12px; padding: 12px 14px; margin-bottom: 14px; }
+.fetch-info { display: flex; flex-direction: column; }
+.fetch-info .label { margin: 0; }
+.fetch-time { font-size: 20px; }
+.fetch-error, .fetch-note { grid-column: 1 / -1; margin: 0; }
+.device-name { display: block; font-size: 12px; font-weight: 400; color: var(--text-2); }
+
 /* ===== スマホ（縦・横）向け。useMediaQuery.ts の COMPACT_QUERY と同じ条件 ===== */
 @media (max-width: 600px), (max-height: 500px) {
   .header { padding: var(--top-space) 10px 6px; gap: 4px 8px; }
@@ -329,5 +339,8 @@ input { -webkit-user-select: text; user-select: text; }
   .prow { flex-wrap: wrap; padding: 8px 10px; }
   .prow-actions { margin-left: auto; }
   .choice { font-size: 16px; padding: 7px 12px; }
+  .scope-switch .choice { font-size: 17px; padding: 8px 0; }
+  .fetch-panel { grid-template-columns: 1fr; }
+  .fetch-panel .btn-go { width: 100%; }
   .toast { bottom: calc(84px + env(safe-area-inset-bottom)); font-size: 15px; }
 }

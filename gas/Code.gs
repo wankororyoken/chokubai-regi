@@ -86,6 +86,10 @@ function doPost(e) {
     return json({ ok: false, error: '混み合っています。少し待ってからもう一度同期してください' });
   }
   try {
+    // アプリの集計画面「全端末」からの問い合わせ
+    if (body.action === 'summary') {
+      return json({ ok: true, applied: true, summary: buildSummary(new Date(body.start), new Date(body.end)) });
+    }
     // アプリの「商品の管理」画面からの保存
     if (body.action === 'saveProducts') {
       saveProducts(Array.isArray(body.upserts) ? body.upserts : [], Array.isArray(body.deletes) ? body.deletes : []);
@@ -212,6 +216,70 @@ function saveProducts(upserts, deletes) {
     .filter((r) => r)
     .sort((a, b) => b - a)
     .forEach((r) => sheet.deleteRow(r));
+}
+
+/**
+ * 全端末の売上を期間で集計する（取消した取引は除く）。
+ * 売上明細ごとではなく集計結果だけを返すので、通信量が少なくて済む。
+ */
+function buildSummary(start, end) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const from = start.getTime();
+  const to = end.getTime();
+  const inRange = (d) => d instanceof Date && d.getTime() >= from && d.getTime() < to;
+
+  const result = { count: 0, cash: 0, paypay: 0, paypayCount: 0, items: [], paypaySales: [], devices: [] };
+  const salesSheet = ss.getSheetByName(SHEET_SALES);
+  const itemSheet = ss.getSheetByName(SHEET_ITEMS);
+
+  const paypayIndex = {};
+  const devices = {};
+  if (salesSheet.getLastRow() > 1) {
+    salesSheet.getRange(2, 1, salesSheet.getLastRow() - 1, 8).getValues().forEach((r) => {
+      if (!inRange(r[1]) || r[7] === true) return;
+      const total = Number(r[4]) || 0;
+      const device = String(r[2] || '（名前なし）');
+      result.count++;
+      devices[device] = devices[device] || { device: device, count: 0, total: 0 };
+      devices[device].count++;
+      devices[device].total += total;
+      if (r[3] === 'PayPay') {
+        result.paypay += total;
+        result.paypayCount++;
+        paypayIndex[String(r[0])] = result.paypaySales.length;
+        result.paypaySales.push({ id: String(r[0]), createdAt: r[1].toISOString(), total: total, device: device, items: [] });
+      } else {
+        result.cash += total;
+      }
+    });
+  }
+
+  const items = {};
+  if (itemSheet.getLastRow() > 1) {
+    itemSheet.getRange(2, 1, itemSheet.getLastRow() - 1, 10).getValues().forEach((r) => {
+      if (!inRange(r[1]) || r[9] === true) return;
+      const name = String(r[5]);
+      const qty = Number(r[7]) || 0;
+      const amount = Number(r[8]) || 0;
+      const row = items[name] || (items[name] = { name: name, qty: 0, amount: 0, cashAmount: 0, paypayAmount: 0, paypayQty: 0 });
+      row.qty += qty;
+      row.amount += amount;
+      if (r[3] === 'PayPay') {
+        row.paypayAmount += amount;
+        row.paypayQty += qty;
+        const i = paypayIndex[String(r[0])];
+        if (i !== undefined) result.paypaySales[i].items.push(name + '×' + qty);
+      } else {
+        row.cashAmount += amount;
+      }
+    });
+  }
+
+  result.items = Object.keys(items).map((k) => items[k]).sort((a, b) => b.amount - a.amount);
+  result.paypaySales.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+  result.paypaySales.forEach((s) => (s.items = s.items.join('、')));
+  result.devices = Object.keys(devices).map((k) => devices[k]).sort((a, b) => b.total - a.total);
+  return result;
 }
 
 /** 商品マスタを読み込む。商品IDが空の行には自動でIDを振る */

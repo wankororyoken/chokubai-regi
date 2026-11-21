@@ -56,3 +56,15 @@ export type Settings = {
   token: string;
   deviceName: string;
 };
+
+/** 集計画面に出す内容（この端末の売上から計算したものと、GASから受け取った全端末分の両方で使う） */
+export type SummaryData = {
+  count: number;
+  cash: number;
+  paypay: number;
+  paypayCount: number;
+  items: { name: string; qty: number; amount: number; cashAmount: number; paypayAmount: number; paypayQty: number }[];
+  paypaySales: { id: string; createdAt: string; total: number; items: string; device?: string }[];
+  /** 全端末の集計のときだけ：端末ごとの件数と合計 */
+  devices?: { device: string; count: number; total: number }[];
+};
