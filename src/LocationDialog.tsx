@@ -5,12 +5,15 @@ type Props = {
   current: string;
   /** 取引の修正中なら、その取引の説明（例「11:30の取引」） */
   editingLabel: string | null;
+  /** 見出しと説明を変えたいとき（まとめて変更など） */
+  title?: string;
+  note?: string;
   onSelect: (name: string) => void;
   onCancel: () => void;
 };
 
 /** 販売場所を選ぶ画面。一覧から選ぶか、新しい場所を入力する */
-export function LocationDialog({ current, editingLabel, onSelect, onCancel }: Props) {
+export function LocationDialog({ current, editingLabel, title, note, onSelect, onCancel }: Props) {
   const [choices, setChoices] = useState<string[]>([]);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState('');
@@ -32,11 +35,10 @@ export function LocationDialog({ current, editingLabel, onSelect, onCancel }: Pr
   return (
     <div className="overlay" onClick={onCancel}>
       <div className="dialog" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="販売場所を選ぶ">
-        <h2 className="dialog-title">{editingLabel ? `${editingLabel}の販売場所` : '販売場所を選ぶ'}</h2>
+        <h2 className="dialog-title">{title ?? (editingLabel ? `${editingLabel}の販売場所` : '販売場所を選ぶ')}</h2>
         <p className="muted small">
-          {editingLabel
-            ? 'この取引の場所だけを変更します。'
-            : '選んだ場所は、変更するまで次の会計にも使われます。'}
+          {note ??
+            (editingLabel ? 'この取引の場所だけを変更します。' : '選んだ場所は、変更するまで次の会計にも使われます。')}
         </p>
 
         <div className="location-list">
@@ -81,7 +83,7 @@ export function LocationDialog({ current, editingLabel, onSelect, onCancel }: Pr
           <button type="button" className="btn btn-sub" onClick={onCancel}>
             やめる
           </button>
-          {current && (
+          {current && !title && (
             <button type="button" className="btn btn-sub" onClick={() => onSelect('')}>
               場所を未設定にする
             </button>

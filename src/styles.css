@@ -264,6 +264,8 @@ input { -webkit-user-select: text; user-select: text; }
 .location-new input { font-size: 18px; padding: 10px 12px; border: 2px solid var(--btn-border); border-radius: 6px; }
 .location-add { width: 100%; }
 .place-filter { margin-bottom: 10px; }
+.bulk-location { width: 100%; margin-bottom: 10px; font-weight: 700; }
+.bulk-to { font-size: 22px; }
 
 /* 履歴：他の端末・明細 */
 .history-row { flex-wrap: wrap; }

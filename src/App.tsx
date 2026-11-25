@@ -243,6 +243,21 @@ export default function App() {
     setScreen('history');
   };
 
+  /** 履歴の「まとめて変更」：この端末の取引の販売場所を一度に書き換え、同期で送る */
+  const bulkChangeLocation = async (ids: string[], name: string) => {
+    await db.transaction('rw', db.sales, async () => {
+      for (const id of ids) {
+        const s = await db.sales.get(id);
+        if (!s || s.location === name) continue;
+        await db.sales.update(id, { location: name, rev: (s.rev ?? 0) + 1, synced: 0 });
+      }
+    });
+    await rememberLocation(name);
+    await refreshStatus();
+    showToast({ message: `${ids.length}件の販売場所を「${name}」にしました` });
+    if (navigator.onLine) runSync(false, false);
+  };
+
   const voidSale = async (id: string) => {
     const s = await db.sales.get(id);
     if (!s) return;
@@ -375,7 +390,12 @@ export default function App() {
           />
         )}
         {screen === 'history' && (
-          <HistoryScreen onBack={() => setScreen('register')} onVoid={voidSale} onEdit={startEdit} />
+          <HistoryScreen
+            onBack={() => setScreen('register')}
+            onVoid={voidSale}
+            onEdit={startEdit}
+            onBulkLocation={bulkChangeLocation}
+          />
         )}
         {screen === 'summary' && <SummaryScreen onBack={() => setScreen('register')} />}
         {screen === 'products' && (

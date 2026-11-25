@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { LocationDialog } from './LocationDialog';
 import { RemotePanel, type Scope } from './RemotePanel';
 import { loadSales, type ListedSale } from './salesData';
 import type { Sale } from './types';
@@ -8,14 +9,19 @@ type Props = {
   onBack: () => void;
   onVoid: (id: string) => Promise<void>;
   onEdit: (sale: Sale) => void;
+  /** この端末の取引（ids）の販売場所をまとめて name に変える */
+  onBulkLocation: (ids: string[], name: string) => Promise<void>;
 };
 
-export function HistoryScreen({ onBack, onVoid, onEdit }: Props) {
+export function HistoryScreen({ onBack, onVoid, onEdit, onBulkLocation }: Props) {
   const [day, setDay] = useState(() => new Date());
   const [scope, setScope] = useState<Scope>('all');
   const [sales, setSales] = useState<ListedSale[]>([]);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  /** まとめて変更：場所を選んでいる途中（'pick'）か、確認中（選んだ場所名） */
+  const [bulk, setBulk] = useState<null | 'pick' | { name: string }>(null);
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const start = new Date(day.getFullYear(), day.getMonth(), day.getDate());
   const end = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
@@ -34,6 +40,14 @@ export function HistoryScreen({ onBack, onVoid, onEdit }: Props) {
   const cash = valid.filter((s) => s.method === 'cash').reduce((n, s) => n + s.total, 0);
   const paypay = valid.filter((s) => s.method === 'paypay').reduce((n, s) => n + s.total, 0);
   const isToday = dayKey(day) === dayKey(new Date());
+  const dayLabel = `${day.getMonth() + 1}月${day.getDate()}日`;
+  // まとめて変更できるのは、この端末で会計した取引だけ
+  const localSales = sales.filter((s) => !s.remote);
+  const beforeCounts = localSales.reduce<Record<string, number>>((m, s) => {
+    const k = s.location || '場所なし';
+    m[k] = (m[k] ?? 0) + 1;
+    return m;
+  }, {});
   const shift = (n: number) => setDay(new Date(day.getFullYear(), day.getMonth(), day.getDate() + n));
 
   return (
@@ -74,6 +88,12 @@ export function HistoryScreen({ onBack, onVoid, onEdit }: Props) {
           <strong>{yen(paypay)}</strong>
         </div>
       </div>
+
+      {localSales.length > 0 && (
+        <button type="button" className="btn btn-sub bulk-location" onClick={() => setBulk('pick')}>
+          📍 この日の取引の販売場所をまとめて変更
+        </button>
+      )}
 
       {sales.length === 0 && <p className="empty">この日の売上はありません</p>}
       <p className="muted small">取引を押すと、明細（単価・数量・預かり・おつり）が開きます。</p>
@@ -179,6 +199,61 @@ export function HistoryScreen({ onBack, onVoid, onEdit }: Props) {
           );
         })}
       </ul>
+
+      {bulk === 'pick' && (
+        <LocationDialog
+          current=""
+          editingLabel={null}
+          title={`${dayLabel}の取引の販売場所をまとめて変更`}
+          note={`この端末で会計した${localSales.length}件の販売場所を、選んだ場所に変えます。`}
+          onCancel={() => setBulk(null)}
+          onSelect={(name) => name && setBulk({ name })}
+        />
+      )}
+
+      {bulk && bulk !== 'pick' && (
+        <div className="overlay" onClick={() => !bulkSaving && setBulk(null)}>
+          <div className="dialog dialog-small" onClick={(e) => e.stopPropagation()} role="alertdialog">
+            <h2 className="dialog-title">販売場所をまとめて変更しますか？</h2>
+            <p>
+              {dayLabel}にこの端末で会計した <strong>{localSales.length}件</strong> を
+              <br />
+              <strong className="bulk-to">📍 {bulk.name}</strong> に変更します。
+            </p>
+            <p className="muted small">
+              今の場所：
+              {Object.entries(beforeCounts)
+                .map(([k, n]) => `${k} ${n}件`)
+                .join('、')}
+            </p>
+            <p className="muted small">
+              他の端末の取引は変わりません（それぞれの端末で変更してください）。変更は次の同期でスプレッドシートにも反映されます。
+            </p>
+            <div className="dialog-actions">
+              <button type="button" className="btn btn-sub" onClick={() => setBulk(null)} disabled={bulkSaving}>
+                やめる
+              </button>
+              <button
+                type="button"
+                className="btn btn-go"
+                disabled={bulkSaving}
+                onClick={async () => {
+                  setBulkSaving(true);
+                  await onBulkLocation(
+                    localSales.map((s) => s.id),
+                    bulk.name,
+                  );
+                  setBulkSaving(false);
+                  setBulk(null);
+                  load();
+                }}
+              >
+                {bulkSaving ? '変更中…' : '変更する'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
