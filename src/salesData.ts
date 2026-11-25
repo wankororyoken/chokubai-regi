@@ -25,10 +25,19 @@ export async function loadSales(start: Date, end: Date, includeRemote: boolean):
 export const getCurrentLocation = () => getMeta<CurrentLocation | null>('currentLocation', null);
 export const setCurrentLocation = (loc: CurrentLocation | null) => setMeta('currentLocation', loc);
 
+/** この端末で入力・選択したことのある場所（新しい順）。会計に使う前でも選択肢から消えないように覚えておく */
+export const getMyLocations = () => getMeta<string[]>('myLocations', []);
+
+export async function rememberLocation(name: string) {
+  const list = await getMyLocations();
+  await setMeta('myLocations', [name, ...list.filter((x) => x !== name)].slice(0, 100));
+}
+
 /** 場所の選択肢：スプレッドシートの「販売場所」の順に、この端末や他の端末で使ったことのある場所を加える */
 export async function loadLocationChoices(): Promise<string[]> {
   const fromSheet = await getMeta<string[]>('locations', []);
-  const used = new Set<string>();
+  // この端末で入力・選択した場所（まだ会計に使っていない場所も含む）
+  const used = new Set<string>(await getMyLocations());
   await db.sales.orderBy('createdAt').reverse().limit(500).each((s) => {
     if (s.location) used.add(s.location);
   });
@@ -36,6 +45,9 @@ export async function loadLocationChoices(): Promise<string[]> {
   await db.remoteSales.orderBy('createdAt').reverse().limit(500).each((s) => {
     if (s.location) used.add(s.location);
   });
+  // スプレッドシートで「非表示」にした場所は、この端末で入力したものでも出さない（今選んでいる場所は除く）
+  const hidden = new Set(await getMeta<string[]>('hiddenLocations', []));
+  for (const h of hidden) used.delete(h);
   const current = await getCurrentLocation();
   if (current?.name) used.add(current.name);
   return [...fromSheet, ...[...used].filter((x) => !fromSheet.includes(x))];

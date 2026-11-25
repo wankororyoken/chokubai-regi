@@ -99,7 +99,15 @@ function doPost(e) {
       return json({ ok: true, applied: true, products: readProducts() });
     }
     const savedIds = saveSales(Array.isArray(body.sales) ? body.sales : []);
-    const result = { ok: true, savedIds: savedIds, products: readProducts(), locations: readLocations() };
+    // アプリで入力された場所（会計に使う前のものも）を「販売場所」シートに追加
+    if (Array.isArray(body.locations)) addLocations(body.locations.map(String).map((x) => x.trim()).filter((x) => x));
+    const result = {
+      ok: true,
+      savedIds: savedIds,
+      products: readProducts(),
+      locations: readLocations(),
+      hiddenLocations: readLocations(true),
+    };
     // 同期のついでに、指定された期間の全端末の取引も返す（履歴・集計で他の端末の売上を見るため）
     if (body.pull && body.pull.start && body.pull.end) {
       result.pulled = { start: body.pull.start, end: body.pull.end, sales: listSales(new Date(body.pull.start), new Date(body.pull.end)) };
@@ -244,14 +252,14 @@ function prepareSheets() {
   }
 }
 
-/** 販売場所の一覧（「非表示」にチェックがないもの、シートの並び順） */
-function readLocations() {
+/** 販売場所の一覧（シートの並び順）。hidden が true なら「非表示」にチェックがあるものを返す */
+function readLocations(hidden) {
   const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOCATIONS);
   if (sh.getLastRow() < 2) return [];
   return sh
     .getRange(2, 1, sh.getLastRow() - 1, 2)
     .getValues()
-    .filter((r) => String(r[0]).trim() && r[1] !== true)
+    .filter((r) => String(r[0]).trim() && (r[1] === true) === !!hidden)
     .map((r) => String(r[0]).trim());
 }
 

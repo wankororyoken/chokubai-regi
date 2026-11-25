@@ -9,7 +9,7 @@ import { RegisterScreen } from './RegisterScreen';
 import { sampleProducts } from './sampleProducts';
 import { SettingsScreen } from './SettingsScreen';
 import { SummaryScreen } from './SummaryScreen';
-import { getCurrentLocation, setCurrentLocation } from './salesData';
+import { getCurrentLocation, rememberLocation, setCurrentLocation } from './salesData';
 import { loadSettings, syncNow } from './sync';
 import type { CartLine, CurrentLocation, PayMethod, Product, Sale } from './types';
 import { formatDateTime, formatTime, uid, yen } from './util';
@@ -409,6 +409,7 @@ export default function App() {
           onCancel={() => setPickingLocation(false)}
           onSelect={(name) => {
             setPickingLocation(false);
+            if (name) rememberLocation(name);
             if (editing) {
               setEditing({ ...editing, location: name });
               return;

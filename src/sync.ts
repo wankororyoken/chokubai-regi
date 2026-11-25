@@ -1,4 +1,5 @@
 import { db, getMeta, setMeta } from './db';
+import { getMyLocations } from './salesData';
 import type { Product, RemoteSale, Sale, Settings } from './types';
 
 export const defaultSettings: Settings = { gasUrl: '', token: '', deviceName: 'レジ1' };
@@ -48,6 +49,8 @@ export async function syncNow(opts: { pull?: boolean } = {}): Promise<SyncResult
         token: settings.token,
         device: settings.deviceName,
         sales: unsent.map(({ synced: _s, ...rest }) => rest),
+        // 入力した場所を送り、スプレッドシートの「販売場所」に載せて他の端末でも選べるようにする
+        locations: await getMyLocations(),
         pull: opts.pull ? { start: pullRange().start.toISOString(), end: pullRange().end.toISOString() } : undefined,
       }),
       signal: controller.signal,
@@ -73,6 +76,9 @@ export async function syncNow(opts: { pull?: boolean } = {}): Promise<SyncResult
       }
       if (Array.isArray(data.locations)) {
         await setMeta('locations', data.locations.map(String).filter((x: string) => x.trim()));
+      }
+      if (Array.isArray(data.hiddenLocations)) {
+        await setMeta('hiddenLocations', data.hiddenLocations.map(String));
       }
       if (data.pulled && Array.isArray(data.pulled.sales)) {
         await storeRemoteSales(new Date(data.pulled.start), new Date(data.pulled.end), data.pulled.sales);
