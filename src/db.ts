@@ -1,11 +1,12 @@
 import Dexie, { type Table } from 'dexie';
-import type { Product, Sale } from './types';
+import type { Product, RemoteSale, Sale } from './types';
 
 type Meta = { key: string; value: unknown };
 
 class RegiDB extends Dexie {
   products!: Table<Product, string>;
   sales!: Table<Sale, string>;
+  remoteSales!: Table<RemoteSale, string>;
   meta!: Table<Meta, string>;
   constructor() {
     super('chokubai-regi');
@@ -13,6 +14,10 @@ class RegiDB extends Dexie {
       products: 'id, order',
       sales: 'id, createdAt, synced',
       meta: 'key',
+    });
+    // v2：他の端末の取引を置いておく表を追加
+    this.version(2).stores({
+      remoteSales: 'id, createdAt',
     });
   }
 }

@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react';
-import { db } from './db';
-import { fetchSummaryRemote, loadSavedSummary, type RemoteSummary } from './sync';
-import type { Sale, SummaryData } from './types';
-import { dayKey, formatDateTime, formatTime, yen } from './util';
+import { useEffect, useMemo, useState } from 'react';
+import { RemotePanel, type Scope } from './RemotePanel';
+import { loadSales, type ListedSale } from './salesData';
+import type { SummaryData } from './types';
+import { dayKey, formatTime, yen } from './util';
 
 type Props = { onBack: () => void };
 type Mode = 'day' | 'month';
-type Scope = 'local' | 'all';
+
+/** 場所の絞り込み：ALL はすべての場所、'' は場所が未設定の取引 */
+const ALL = '__all__';
 
 function range(mode: Mode, base: Date) {
   const start =
@@ -20,14 +22,27 @@ function range(mode: Mode, base: Date) {
   return { start, end };
 }
 
-/** この端末に保存されている売上から集計する */
-function summarizeLocal(sales: Sale[]): SummaryData {
+/** 取引の一覧から集計する（取消した取引は除く） */
+function summarize(all: ListedSale[]): SummaryData {
+  const sales = all.filter((s) => !s.voided);
   const map = new Map<string, SummaryData['items'][number]>();
+  const devices = new Map<string, { device: string; count: number; total: number }>();
+  const locations = new Map<string, { location: string; count: number; total: number }>();
   let cash = 0;
   let paypay = 0;
   for (const s of sales) {
     if (s.method === 'cash') cash += s.total;
     else paypay += s.total;
+    const dev = s.remote ? s.device || '他の端末' : `${s.device}（この端末）`;
+    const d = devices.get(dev) ?? { device: dev, count: 0, total: 0 };
+    d.count++;
+    d.total += s.total;
+    devices.set(dev, d);
+    const loc = s.location || '';
+    const l = locations.get(loc) ?? { location: loc, count: 0, total: 0 };
+    l.count++;
+    l.total += s.total;
+    locations.set(loc, l);
     for (const i of s.items) {
       const row = map.get(i.name) ?? { name: i.name, qty: 0, amount: 0, cashAmount: 0, paypayAmount: 0, paypayQty: 0 };
       row.qty += i.qty;
@@ -46,6 +61,8 @@ function summarizeLocal(sales: Sale[]): SummaryData {
       id: s.id,
       createdAt: s.createdAt,
       total: s.total,
+      device: s.remote ? s.device : 'この端末',
+      location: s.location ?? '',
       items: s.items.map((i) => `${i.name}×${i.qty}`).join('、'),
     }));
   return {
@@ -55,47 +72,34 @@ function summarizeLocal(sales: Sale[]): SummaryData {
     paypayCount: paypaySales.length,
     items: [...map.values()].sort((a, b) => b.amount - a.amount),
     paypaySales,
+    devices: [...devices.values()].sort((a, b) => b.total - a.total),
+    locations: [...locations.values()].sort((a, b) => b.total - a.total),
   };
 }
 
 export function SummaryScreen({ onBack }: Props) {
-  const [scope, setScope] = useState<Scope>('local');
+  const [scope, setScope] = useState<Scope>('all');
   const [mode, setMode] = useState<Mode>('day');
   const [base, setBase] = useState(() => new Date());
-  const [local, setLocal] = useState<SummaryData | null>(null);
-  const [remote, setRemote] = useState<RemoteSummary | null>(null);
-  const [fetching, setFetching] = useState(false);
-  const [error, setError] = useState('');
+  const [sales, setSales] = useState<ListedSale[]>([]);
+  const [place, setPlace] = useState<string>(ALL);
 
   const { start, end } = range(mode, base);
   const startKey = start.toISOString();
 
-  // この端末の売上はすぐ集計。全端末は前回取得した結果があればそれを表示（自動では取りに行かない）
+  const load = async () => setSales(await loadSales(start, end, scope === 'all'));
   useEffect(() => {
-    setError('');
-    if (scope === 'local') {
-      db.sales
-        .where('createdAt')
-        .between(start.toISOString(), end.toISOString(), true, false)
-        .toArray()
-        .then((rows) =>
-          setLocal(summarizeLocal(rows.filter((s) => !s.voided).sort((a, b) => a.createdAt.localeCompare(b.createdAt)))),
-        );
-    } else {
-      setRemote(null);
-      loadSavedSummary(start, end).then(setRemote);
-    }
-    // start/end は mode と base から決まるので、期間の変化は startKey で見る
-  }, [scope, mode, startKey]);
+    load();
+    // 期間（startKey）と表示する端末が変わったら読み直す
+  }, [scope, mode, startKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fetchAll = async () => {
-    setFetching(true);
-    setError('');
-    const r = await fetchSummaryRemote(start, end);
-    setFetching(false);
-    if (r.ok) setRemote(r.summary);
-    else setError(r.message);
-  };
+  // この期間に売った場所の一覧（絞り込みの選択肢）
+  const places = useMemo(() => [...new Set(sales.filter((s) => !s.voided).map((s) => s.location || ''))], [sales]);
+  const currentPlace = place === ALL || places.includes(place) ? place : ALL;
+  const data = useMemo(
+    () => summarize(currentPlace === ALL ? sales : sales.filter((s) => (s.location || '') === currentPlace)),
+    [sales, currentPlace],
+  );
 
   const now = new Date();
   const isCurrent =
@@ -113,8 +117,6 @@ export function SummaryScreen({ onBack }: Props) {
       ? `${base.getMonth() + 1}月${base.getDate()}日${isCurrent ? '（今日）' : ''}`
       : `${base.getFullYear()}年${base.getMonth() + 1}月${isCurrent ? '（今月）' : ''}`;
 
-  const data = scope === 'local' ? local : remote?.data ?? null;
-
   return (
     <div className="page">
       <div className="page-head">
@@ -125,26 +127,7 @@ export function SummaryScreen({ onBack }: Props) {
         <span />
       </div>
 
-      <div className="scope-switch" role="tablist" aria-label="集計する端末">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={scope === 'local'}
-          className={`btn choice ${scope === 'local' ? 'selected' : ''}`}
-          onClick={() => setScope('local')}
-        >
-          この端末
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={scope === 'all'}
-          className={`btn choice ${scope === 'all' ? 'selected' : ''}`}
-          onClick={() => setScope('all')}
-        >
-          全端末
-        </button>
-      </div>
+      <RemotePanel scope={scope} onScope={setScope} start={start} end={end} onFetched={load} />
 
       <div className="mode-switch" role="tablist" aria-label="期間">
         <button
@@ -183,36 +166,48 @@ export function SummaryScreen({ onBack }: Props) {
         </button>
       </div>
 
-      {scope === 'all' && (
-        <div className="fetch-panel">
-          <div className="fetch-info">
-            <span className="label">最終取得</span>
-            <strong className="fetch-time">{remote ? formatDateTime(remote.fetchedAt) : 'まだ取得していません'}</strong>
+      {places.length > 0 && (
+        <div className="place-filter">
+          <span className="label">販売場所</span>
+          <div className="choice-row">
+            <button
+              type="button"
+              className={`btn choice ${currentPlace === ALL ? 'selected' : ''}`}
+              onClick={() => setPlace(ALL)}
+            >
+              すべての場所
+            </button>
+            {places.map((p) => (
+              <button
+                key={p || '(none)'}
+                type="button"
+                className={`btn choice ${currentPlace === p ? 'selected' : ''}`}
+                onClick={() => setPlace(p)}
+              >
+                {p || '場所なし'}
+              </button>
+            ))}
           </div>
-          <button type="button" className="btn btn-go" onClick={fetchAll} disabled={fetching}>
-            {fetching ? '取得中…' : '⟳ 全端末の売上を取得'}
-          </button>
-          {error && <p className="error fetch-error">{error}</p>}
-          <p className="muted small fetch-note">
-            スプレッドシートに送られた売上を集計します。まだ同期していない端末の売上や、取得したあとの会計は、もう一度取得すると反映されます。
-          </p>
         </div>
       )}
 
-      {scope === 'local' && (
-        <p className="muted small">この端末で会計した売上です（取消した取引は含みません）。</p>
-      )}
-
-      {data ? (
-        <SummaryView data={data} mode={mode} showDevices={scope === 'all'} />
-      ) : (
-        scope === 'all' && !fetching && <p className="empty">「全端末の売上を取得」を押すと、この期間の集計が表示されます</p>
-      )}
+      <p className="muted small">取消した取引は含みません。</p>
+      <SummaryView data={data} mode={mode} showDevices={scope === 'all'} showLocations={currentPlace === ALL} />
     </div>
   );
 }
 
-function SummaryView({ data, mode, showDevices }: { data: SummaryData; mode: Mode; showDevices: boolean }) {
+function SummaryView({
+  data,
+  mode,
+  showDevices,
+  showLocations,
+}: {
+  data: SummaryData;
+  mode: Mode;
+  showDevices: boolean;
+  showLocations: boolean;
+}) {
   const maxAmount = Math.max(1, ...data.items.map((i) => i.amount));
   const paypayItems = data.items.filter((i) => i.paypayQty > 0).sort((a, b) => b.paypayAmount - a.paypayAmount);
   const when = (iso: string) => {
@@ -236,6 +231,30 @@ function SummaryView({ data, mode, showDevices }: { data: SummaryData; mode: Mod
           <strong>{yen(data.paypay)}</strong>
         </div>
       </div>
+
+      {showLocations && data.locations && data.locations.length > 0 && (
+        <>
+          <h2 className="section-title">販売場所ごとの売上</h2>
+          <table className="sum-table">
+            <thead>
+              <tr>
+                <th>販売場所</th>
+                <th className="num">件数</th>
+                <th className="num">金額</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.locations.map((l) => (
+                <tr key={l.location || '(none)'}>
+                  <td className="strong">{l.location || '場所なし'}</td>
+                  <td className="num">{l.count}件</td>
+                  <td className="num strong">{yen(l.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
 
       {showDevices && data.devices && data.devices.length > 0 && (
         <>
@@ -347,6 +366,7 @@ function SummaryView({ data, mode, showDevices }: { data: SummaryData; mode: Mod
                   <td className="strong nowrap">
                     {when(s.createdAt)}
                     {s.device && <span className="device-name">{s.device}</span>}
+                    {s.location && <span className="device-name">{s.location}</span>}
                   </td>
                   <td className="num strong">{yen(s.total)}</td>
                   <td className="muted">{s.items}</td>

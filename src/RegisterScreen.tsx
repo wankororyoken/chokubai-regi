@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CartLine, Product } from './types';
 import { COMPACT_QUERY, useMediaQuery } from './useMediaQuery';
-import { categoryColor, yen } from './util';
+import { categoryColor, dayKey, yen } from './util';
 
 const POPULAR = '__popular__';
 
@@ -18,6 +18,11 @@ type Props = {
   /** 履歴の取引を修正中なら、その説明（例「11:30の取引を修正中」） */
   editingLabel: string | null;
   onCancelEdit: () => void;
+  /** 販売場所（空なら未設定） */
+  locationName: string;
+  /** 販売場所を選んだ日時（今日以外なら注意書きを出す）。修正中は null */
+  locationSetAt: string | null;
+  onPickLocation: () => void;
 };
 
 export function RegisterScreen(props: Props) {
@@ -65,6 +70,7 @@ export function RegisterScreen(props: Props) {
     <div className={`register ${compact ? 'compact' : ''}`}>
       <section className="products-pane" aria-label="商品">
         {compact && editBanner}
+        <LocationBar name={props.locationName} setAt={props.locationSetAt} onPick={props.onPickLocation} />
         <div className="tabs" role="tablist">
           {tabs.map((t) => (
             <button
@@ -186,5 +192,19 @@ export function RegisterScreen(props: Props) {
       </section>
       )}
     </div>
+  );
+}
+
+/** レジ画面上部の販売場所。押すと場所を選ぶ画面が開く */
+function LocationBar({ name, setAt, onPick }: { name: string; setAt: string | null; onPick: () => void }) {
+  const stale = !!setAt && dayKey(new Date(setAt)) !== dayKey(new Date());
+  const d = setAt ? new Date(setAt) : null;
+  return (
+    <button type="button" className={`btn location-bar ${name ? '' : 'unset'}`} onClick={onPick}>
+      <span className="location-label">販売場所</span>
+      <span className="location-name">{name || '未設定（押して選ぶ）'}</span>
+      {stale && d && <span className="location-stale">{d.getMonth() + 1}/{d.getDate()}に選んだ場所</span>}
+      <span className="location-change">変更 ▼</span>
+    </button>
   );
 }

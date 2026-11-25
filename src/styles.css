@@ -249,6 +249,41 @@ input { -webkit-user-select: text; user-select: text; }
 .fetch-error, .fetch-note { grid-column: 1 / -1; margin: 0; }
 .device-name { display: block; font-size: 12px; font-weight: 400; color: var(--text-2); }
 
+/* 販売場所 */
+.location-bar { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 14px; margin-bottom: 10px; background: var(--surface); text-align: left; flex-wrap: wrap; }
+.location-bar.unset { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
+.location-label { font-size: 14px; color: var(--text-2); }
+.location-bar.unset .location-label { color: var(--warn); }
+.location-name { font-size: 20px; font-weight: 700; flex: 1; min-width: 0; }
+.location-stale { font-size: 13px; background: var(--warn-bg); color: var(--warn); border-radius: 6px; padding: 2px 8px; font-weight: 700; }
+.location-change { font-size: 15px; color: var(--accent-dark); font-weight: 700; white-space: nowrap; }
+.location-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; max-height: 45vh; overflow-y: auto; }
+.location-choice { font-size: 19px; padding: 12px 14px; text-align: left; background: var(--surface); }
+.location-choice.selected { background: var(--accent-bg); color: var(--accent-dark); border-color: var(--accent); font-weight: 700; }
+.location-new { display: flex; flex-direction: column; gap: 8px; }
+.location-new input { font-size: 18px; padding: 10px 12px; border: 2px solid var(--btn-border); border-radius: 6px; }
+.location-add { width: 100%; }
+.place-filter { margin-bottom: 10px; }
+
+/* 履歴：他の端末・明細 */
+.history-row { flex-wrap: wrap; }
+.history-row.remote { background: #fbfaf6; }
+.history-toggle { display: flex; align-items: flex-start; gap: 12px; flex: 1; min-width: 0; text-align: left; background: none; border: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.history-text { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.history-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { font-size: 12px; padding: 1px 8px; border-radius: 6px; background: var(--surface-2); color: var(--text-2); border: 1px solid var(--line); }
+.tag-local { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+.tag-remote { background: var(--accent-bg); color: var(--accent-dark); border-color: transparent; font-weight: 700; }
+.history-open { color: var(--text-2); font-size: 14px; }
+.history-detail { flex-basis: 100%; margin-top: 8px; padding: 10px 12px; background: var(--surface-2); border-radius: 8px; }
+.detail-table { width: 100%; border-collapse: collapse; font-size: 16px; }
+.detail-table td { padding: 4px 0; border-bottom: 1px solid var(--line); }
+.detail-table .num { text-align: right; white-space: nowrap; padding-left: 10px; }
+.detail-table .strong { font-weight: 700; }
+.detail-meta { display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; margin: 8px 0 0; font-size: 15px; }
+.detail-meta dt { color: var(--text-2); }
+.detail-meta dd { margin: 0; font-weight: 700; }
+
 /* ===== スマホ（縦・横）向け。useMediaQuery.ts の COMPACT_QUERY と同じ条件 ===== */
 @media (max-width: 600px), (max-height: 500px) {
   .header { padding: var(--top-space) 10px 6px; gap: 4px 8px; }
@@ -342,5 +377,8 @@ input { -webkit-user-select: text; user-select: text; }
   .scope-switch .choice { font-size: 17px; padding: 8px 0; }
   .fetch-panel { grid-template-columns: 1fr; }
   .fetch-panel .btn-go { width: 100%; }
+  .location-bar { padding: 6px 10px; margin-bottom: 8px; gap: 6px 10px; }
+  .location-name { font-size: 17px; }
+  .history-items { white-space: normal; }
   .toast { bottom: calc(84px + env(safe-area-inset-bottom)); font-size: 15px; }
 }

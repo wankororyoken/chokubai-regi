@@ -43,6 +43,8 @@ export type Sale = {
   change: number;
   voided: boolean;
   items: SaleItem[];
+  /** 売った場所（スーパー名など）。未設定なら空 */
+  location?: string;
   /** 修正した日時（修正していなければなし） */
   editedAt?: string;
   /** 修正・取消のたびに 1 増える。同期中に変わったかの判定用 */
@@ -64,7 +66,15 @@ export type SummaryData = {
   paypay: number;
   paypayCount: number;
   items: { name: string; qty: number; amount: number; cashAmount: number; paypayAmount: number; paypayQty: number }[];
-  paypaySales: { id: string; createdAt: string; total: number; items: string; device?: string }[];
+  paypaySales: { id: string; createdAt: string; total: number; items: string; device?: string; location?: string }[];
   /** 全端末の集計のときだけ：端末ごとの件数と合計 */
   devices?: { device: string; count: number; total: number }[];
+  /** 販売場所ごとの件数と合計（'' は場所なし） */
+  locations?: { location: string; count: number; total: number }[];
 };
+
+/** 他の端末の取引（同期・取得でスプレッドシートから受け取ったもの。この端末では修正できない） */
+export type RemoteSale = Omit<Sale, 'synced' | 'rev'>;
+
+/** レジで今選んでいる販売場所と、選んだ日時 */
+export type CurrentLocation = { name: string; setAt: string };

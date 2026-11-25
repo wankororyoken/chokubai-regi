@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { db } from './db';
+import { RemotePanel, type Scope } from './RemotePanel';
+import { loadSales, type ListedSale } from './salesData';
 import type { Sale } from './types';
-import { dayKey, formatTime, yen } from './util';
+import { dayKey, formatDateTime, formatTime, yen } from './util';
 
 type Props = {
   onBack: () => void;
@@ -11,19 +12,23 @@ type Props = {
 
 export function HistoryScreen({ onBack, onVoid, onEdit }: Props) {
   const [day, setDay] = useState(() => new Date());
-  const [sales, setSales] = useState<Sale[]>([]);
+  const [scope, setScope] = useState<Scope>('all');
+  const [sales, setSales] = useState<ListedSale[]>([]);
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
 
-  const load = async (d: Date) => {
-    const start = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString();
-    const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).toISOString();
-    const rows = await db.sales.where('createdAt').between(start, end, true, false).toArray();
-    setSales(rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  const start = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+  const end = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+
+  const load = async () => {
+    const rows = await loadSales(start, end, scope === 'all');
+    setSales(rows.reverse());
   };
 
   useEffect(() => {
-    load(day);
-  }, [day]);
+    load();
+    // 日付と表示する端末が変わったら読み直す
+  }, [day, scope]);
 
   const valid = sales.filter((s) => !s.voided);
   const cash = valid.filter((s) => s.method === 'cash').reduce((n, s) => n + s.total, 0);
@@ -40,6 +45,8 @@ export function HistoryScreen({ onBack, onVoid, onEdit }: Props) {
         <h1>売上の履歴</h1>
         <span />
       </div>
+
+      <RemotePanel scope={scope} onScope={setScope} start={start} end={end} onFetched={load} />
 
       <div className="day-nav">
         <button type="button" className="btn btn-sub" onClick={() => shift(-1)}>
@@ -59,7 +66,7 @@ export function HistoryScreen({ onBack, onVoid, onEdit }: Props) {
           <strong>{yen(cash + paypay)}</strong>
         </div>
         <div className="metric">
-          <span className="muted small">現金（レジに入っているはずの金額）</span>
+          <span className="muted small">{scope === 'local' ? '現金（この端末のレジに入っているはずの金額）' : '現金'}</span>
           <strong>{yen(cash)}</strong>
         </div>
         <div className="metric">
@@ -69,52 +76,108 @@ export function HistoryScreen({ onBack, onVoid, onEdit }: Props) {
       </div>
 
       {sales.length === 0 && <p className="empty">この日の売上はありません</p>}
+      <p className="muted small">取引を押すと、明細（単価・数量・預かり・おつり）が開きます。</p>
       <ul className="history">
-        {sales.map((s) => (
-          <li key={s.id} className={`history-row ${s.voided ? 'voided' : ''}`}>
-            <div className="history-main">
-              <span className="history-time">{formatTime(s.createdAt)}</span>
-              <span className="history-items">
-                {s.items.map((i) => `${i.name}×${i.qty}`).join('、')}
-              </span>
-            </div>
-            <div className="history-side">
-              <span className={`badge ${s.method}`}>{s.method === 'cash' ? '現金' : 'PayPay'}</span>
-              <strong>{yen(s.total)}</strong>
-              {s.voided ? (
-                <span className="badge voided-badge">取消済み</span>
-              ) : confirmId === s.id ? (
-                <span className="confirm">
-                  <button
-                    type="button"
-                    className="btn btn-del"
-                    onClick={async () => {
-                      await onVoid(s.id);
-                      setConfirmId(null);
-                      load(day);
-                    }}
-                  >
-                    取り消す
-                  </button>
-                  <button type="button" className="btn btn-small" onClick={() => setConfirmId(null)}>
-                    やめる
-                  </button>
+        {sales.map((s) => {
+          const open = openId === s.id;
+          const local = !s.remote ? (s as Sale & { remote: boolean }) : null;
+          return (
+            <li key={s.id} className={`history-row ${s.voided ? 'voided' : ''} ${s.remote ? 'remote' : ''}`}>
+              <button
+                type="button"
+                className="history-main history-toggle"
+                onClick={() => setOpenId(open ? null : s.id)}
+                aria-expanded={open}
+              >
+                <span className="history-time">{formatTime(s.createdAt)}</span>
+                <span className="history-text">
+                  <span className="history-items">{s.items.map((i) => `${i.name}×${i.qty}`).join('、')}</span>
+                  <span className="history-tags">
+                    <span className={`tag ${s.remote ? 'tag-remote' : 'tag-local'}`}>
+                      {s.remote ? s.device || '他の端末' : 'この端末'}
+                    </span>
+                    <span className="tag">{s.location ? `📍 ${s.location}` : '場所なし'}</span>
+                  </span>
                 </span>
-              ) : (
-                <>
-                  <button type="button" className="btn btn-small" onClick={() => onEdit(s)}>
-                    ✎ 修正
-                  </button>
-                  <button type="button" className="btn btn-small" onClick={() => setConfirmId(s.id)}>
-                    取消
-                  </button>
-                </>
+                <span className="history-open">{open ? '▲' : '▼'}</span>
+              </button>
+              <div className="history-side">
+                <span className={`badge ${s.method}`}>{s.method === 'cash' ? '現金' : 'PayPay'}</span>
+                <strong>{yen(s.total)}</strong>
+                {s.voided ? (
+                  <span className="badge voided-badge">取消済み</span>
+                ) : !local ? null : confirmId === s.id ? (
+                  <span className="confirm">
+                    <button
+                      type="button"
+                      className="btn btn-del"
+                      onClick={async () => {
+                        await onVoid(s.id);
+                        setConfirmId(null);
+                        load();
+                      }}
+                    >
+                      取り消す
+                    </button>
+                    <button type="button" className="btn btn-small" onClick={() => setConfirmId(null)}>
+                      やめる
+                    </button>
+                  </span>
+                ) : (
+                  <>
+                    <button type="button" className="btn btn-small" onClick={() => onEdit(local)}>
+                      ✎ 修正
+                    </button>
+                    <button type="button" className="btn btn-small" onClick={() => setConfirmId(s.id)}>
+                      取消
+                    </button>
+                  </>
+                )}
+                {s.editedAt && !s.voided && <span className="badge edited">修正済み</span>}
+                {local && !local.synced && <span className="badge unsent">未送信</span>}
+              </div>
+
+              {open && (
+                <div className="history-detail">
+                  <table className="detail-table">
+                    <tbody>
+                      {s.items.map((i, idx) => (
+                        <tr key={idx}>
+                          <td>{i.name}</td>
+                          <td className="num">
+                            {yen(i.unitPrice)} × {i.qty}
+                          </td>
+                          <td className="num strong">{yen(i.subtotal)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <dl className="detail-meta">
+                    {s.method === 'cash' && (
+                      <>
+                        <dt>預かり</dt>
+                        <dd>{yen(s.received)}</dd>
+                        <dt>おつり</dt>
+                        <dd>{yen(s.change)}</dd>
+                      </>
+                    )}
+                    <dt>端末</dt>
+                    <dd>{s.device || '—'}</dd>
+                    <dt>販売場所</dt>
+                    <dd>{s.location || '未設定'}</dd>
+                    {s.editedAt && (
+                      <>
+                        <dt>修正</dt>
+                        <dd>{formatDateTime(s.editedAt)}</dd>
+                      </>
+                    )}
+                  </dl>
+                  {s.remote && <p className="muted small">他の端末の取引は、会計した端末で修正・取消できます。</p>}
+                </div>
               )}
-              {s.editedAt && !s.voided && <span className="badge edited">修正済み</span>}
-              {!s.synced && <span className="badge unsent">未送信</span>}
-            </div>
-          </li>
-        ))}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

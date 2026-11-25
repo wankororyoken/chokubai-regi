@@ -11,10 +11,12 @@
 const SHEET_PRODUCTS = '商品マスタ';
 const SHEET_SALES = '売上';
 const SHEET_ITEMS = '売上明細';
+const SHEET_LOCATIONS = '販売場所';
 
 const PRODUCT_HEADERS = ['商品ID', '品名', '区分', '価格', '時価', 'よく使う価格', '表示順', '非表示', 'よく売れる'];
-const SALES_HEADERS = ['取引ID', '日時', '端末', '支払方法', '合計', '預かり', 'おつり', '取消', '受信日時', '修正日時'];
-const ITEM_HEADERS = ['取引ID', '日時', '端末', '支払方法', '商品ID', '品名', '単価', '数量', '小計', '取消'];
+const SALES_HEADERS = ['取引ID', '日時', '端末', '支払方法', '合計', '預かり', 'おつり', '取消', '受信日時', '修正日時', '販売場所'];
+const ITEM_HEADERS = ['取引ID', '日時', '端末', '支払方法', '商品ID', '品名', '単価', '数量', '小計', '取消', '販売場所'];
+const LOCATION_HEADERS = ['場所名', '非表示'];
 
 /** 最初に一度だけ実行する */
 function setup() {
@@ -48,7 +50,7 @@ function setup() {
     SpreadsheetApp.newDataValidation().requireValueInList(['野菜', '卵', '果物', '加工品', 'その他'], true)
       .setAllowInvalid(true).build());
 
-  [[SHEET_SALES, SALES_HEADERS], [SHEET_ITEMS, ITEM_HEADERS]].forEach(([name, headers]) => {
+  [[SHEET_SALES, SALES_HEADERS], [SHEET_ITEMS, ITEM_HEADERS], [SHEET_LOCATIONS, LOCATION_HEADERS]].forEach(([name, headers]) => {
     if (!ss.getSheetByName(name)) {
       const sh = ss.insertSheet(name);
       sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
@@ -86,9 +88,10 @@ function doPost(e) {
     return json({ ok: false, error: '混み合っています。少し待ってからもう一度同期してください' });
   }
   try {
-    // アプリの集計画面「全端末」からの問い合わせ
-    if (body.action === 'summary') {
-      return json({ ok: true, applied: true, summary: buildSummary(new Date(body.start), new Date(body.end)) });
+    prepareSheets();
+    // 履歴・集計の「全端末の売上を取得」：期間内の全端末の取引を返す
+    if (body.action === 'listSales') {
+      return json({ ok: true, applied: true, sales: listSales(new Date(body.start), new Date(body.end)) });
     }
     // アプリの「商品の管理」画面からの保存
     if (body.action === 'saveProducts') {
@@ -96,8 +99,12 @@ function doPost(e) {
       return json({ ok: true, applied: true, products: readProducts() });
     }
     const savedIds = saveSales(Array.isArray(body.sales) ? body.sales : []);
-    const products = readProducts();
-    return json({ ok: true, savedIds: savedIds, products: products });
+    const result = { ok: true, savedIds: savedIds, products: readProducts(), locations: readLocations() };
+    // 同期のついでに、指定された期間の全端末の取引も返す（履歴・集計で他の端末の売上を見るため）
+    if (body.pull && body.pull.start && body.pull.end) {
+      result.pulled = { start: body.pull.start, end: body.pull.end, sales: listSales(new Date(body.pull.start), new Date(body.pull.end)) };
+    }
+    return json(result);
   } catch (err) {
     return json({ ok: false, error: 'スプレッドシートの処理でエラーが出ました: ' + err.message });
   } finally {
@@ -129,13 +136,16 @@ function saveSales(sales) {
   const newItems = [];
   const replacedIds = {};
   const savedIds = [];
+  const usedLocations = {};
 
   sales.forEach((s) => {
     if (!s || !s.id) return;
     const method = s.method === 'paypay' ? 'PayPay' : '現金';
     const at = new Date(s.createdAt);
     const edited = s.editedAt ? new Date(s.editedAt) : '';
-    const row = [s.id, at, s.device || '', method, s.total, s.received, s.change, !!s.voided, now, edited];
+    const location = String(s.location || '').trim();
+    if (location) usedLocations[location] = true;
+    const row = [s.id, at, s.device || '', method, s.total, s.received, s.change, !!s.voided, now, edited, location];
     if (existing[s.id] > 0) {
       salesSheet.getRange(existing[s.id], 1, 1, SALES_HEADERS.length).setValues([row]);
       replacedIds[s.id] = true;
@@ -149,7 +159,7 @@ function saveSales(sales) {
       existing[s.id] = -1;
     }
     (s.items || []).forEach((it) => {
-      newItems.push([s.id, at, s.device || '', method, it.productId || '', it.name, it.unitPrice, it.qty, it.subtotal, !!s.voided]);
+      newItems.push([s.id, at, s.device || '', method, it.productId || '', it.name, it.unitPrice, it.qty, it.subtotal, !!s.voided, location]);
     });
     savedIds.push(s.id);
   });
@@ -167,6 +177,7 @@ function saveSales(sales) {
   if (newItems.length) {
     itemSheet.getRange(itemSheet.getLastRow() + 1, 1, newItems.length, ITEM_HEADERS.length).setValues(newItems);
   }
+  addLocations(Object.keys(usedLocations));
   return savedIds;
 }
 
@@ -219,67 +230,88 @@ function saveProducts(upserts, deletes) {
 }
 
 /**
- * 全端末の売上を期間で集計する（取消した取引は除く）。
- * 売上明細ごとではなく集計結果だけを返すので、通信量が少なくて済む。
+ * 前の版のスプレッドシートにも新しい列・シートを足す（setup をやり直さなくてよいように）。
+ * 見出し行を毎回書き直すだけなので、データには触れない。
  */
-function buildSummary(start, end) {
+function prepareSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ss.getSheetByName(SHEET_SALES).getRange(1, 1, 1, SALES_HEADERS.length).setValues([SALES_HEADERS]);
+  ss.getSheetByName(SHEET_ITEMS).getRange(1, 1, 1, ITEM_HEADERS.length).setValues([ITEM_HEADERS]);
+  if (!ss.getSheetByName(SHEET_LOCATIONS)) {
+    const sh = ss.insertSheet(SHEET_LOCATIONS);
+    sh.getRange(1, 1, 1, LOCATION_HEADERS.length).setValues([LOCATION_HEADERS]).setFontWeight('bold');
+    sh.setFrozenRows(1);
+  }
+}
+
+/** 販売場所の一覧（「非表示」にチェックがないもの、シートの並び順） */
+function readLocations() {
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOCATIONS);
+  if (sh.getLastRow() < 2) return [];
+  return sh
+    .getRange(2, 1, sh.getLastRow() - 1, 2)
+    .getValues()
+    .filter((r) => String(r[0]).trim() && r[1] !== true)
+    .map((r) => String(r[0]).trim());
+}
+
+/** アプリで新しく使われた場所を「販売場所」シートに追加する（すでにあるものは追加しない） */
+function addLocations(names) {
+  if (!names.length) return;
+  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_LOCATIONS);
+  const known = {};
+  if (sh.getLastRow() > 1) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues().forEach((r) => (known[String(r[0]).trim()] = true));
+  }
+  const rows = names.filter((n) => !known[n]).map((n) => [n, false]);
+  if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, 2).setValues(rows);
+}
+
+/** 期間内の全端末の取引を、明細つきで返す（取消・修正済みのものも含む） */
+function listSales(start, end) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const from = start.getTime();
   const to = end.getTime();
   const inRange = (d) => d instanceof Date && d.getTime() >= from && d.getTime() < to;
-
-  const result = { count: 0, cash: 0, paypay: 0, paypayCount: 0, items: [], paypaySales: [], devices: [] };
   const salesSheet = ss.getSheetByName(SHEET_SALES);
   const itemSheet = ss.getSheetByName(SHEET_ITEMS);
 
-  const paypayIndex = {};
-  const devices = {};
+  const list = [];
+  const byId = {};
   if (salesSheet.getLastRow() > 1) {
-    salesSheet.getRange(2, 1, salesSheet.getLastRow() - 1, 8).getValues().forEach((r) => {
-      if (!inRange(r[1]) || r[7] === true) return;
-      const total = Number(r[4]) || 0;
-      const device = String(r[2] || '（名前なし）');
-      result.count++;
-      devices[device] = devices[device] || { device: device, count: 0, total: 0 };
-      devices[device].count++;
-      devices[device].total += total;
-      if (r[3] === 'PayPay') {
-        result.paypay += total;
-        result.paypayCount++;
-        paypayIndex[String(r[0])] = result.paypaySales.length;
-        result.paypaySales.push({ id: String(r[0]), createdAt: r[1].toISOString(), total: total, device: device, items: [] });
-      } else {
-        result.cash += total;
-      }
+    salesSheet.getRange(2, 1, salesSheet.getLastRow() - 1, SALES_HEADERS.length).getValues().forEach((r) => {
+      if (!inRange(r[1])) return;
+      const sale = {
+        id: String(r[0]),
+        createdAt: r[1].toISOString(),
+        device: String(r[2] || ''),
+        method: r[3] === 'PayPay' ? 'paypay' : 'cash',
+        total: Number(r[4]) || 0,
+        received: Number(r[5]) || 0,
+        change: Number(r[6]) || 0,
+        voided: r[7] === true,
+        editedAt: r[9] instanceof Date ? r[9].toISOString() : undefined,
+        location: String(r[10] || ''),
+        items: [],
+      };
+      byId[sale.id] = sale;
+      list.push(sale);
     });
   }
-
-  const items = {};
-  if (itemSheet.getLastRow() > 1) {
-    itemSheet.getRange(2, 1, itemSheet.getLastRow() - 1, 10).getValues().forEach((r) => {
-      if (!inRange(r[1]) || r[9] === true) return;
-      const name = String(r[5]);
-      const qty = Number(r[7]) || 0;
-      const amount = Number(r[8]) || 0;
-      const row = items[name] || (items[name] = { name: name, qty: 0, amount: 0, cashAmount: 0, paypayAmount: 0, paypayQty: 0 });
-      row.qty += qty;
-      row.amount += amount;
-      if (r[3] === 'PayPay') {
-        row.paypayAmount += amount;
-        row.paypayQty += qty;
-        const i = paypayIndex[String(r[0])];
-        if (i !== undefined) result.paypaySales[i].items.push(name + '×' + qty);
-      } else {
-        row.cashAmount += amount;
-      }
+  if (list.length && itemSheet.getLastRow() > 1) {
+    itemSheet.getRange(2, 1, itemSheet.getLastRow() - 1, 9).getValues().forEach((r) => {
+      const sale = byId[String(r[0])];
+      if (!sale) return;
+      sale.items.push({
+        productId: r[4] ? String(r[4]) : null,
+        name: String(r[5]),
+        unitPrice: Number(r[6]) || 0,
+        qty: Number(r[7]) || 0,
+        subtotal: Number(r[8]) || 0,
+      });
     });
   }
-
-  result.items = Object.keys(items).map((k) => items[k]).sort((a, b) => b.amount - a.amount);
-  result.paypaySales.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
-  result.paypaySales.forEach((s) => (s.items = s.items.join('、')));
-  result.devices = Object.keys(devices).map((k) => devices[k]).sort((a, b) => b.total - a.total);
-  return result;
+  return list;
 }
 
 /** 商品マスタを読み込む。商品IDが空の行には自動でIDを振る */

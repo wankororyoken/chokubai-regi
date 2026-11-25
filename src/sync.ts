@@ -1,5 +1,5 @@
 import { db, getMeta, setMeta } from './db';
-import type { Product, Sale, Settings, SummaryData } from './types';
+import type { Product, RemoteSale, Sale, Settings } from './types';
 
 export const defaultSettings: Settings = { gasUrl: '', token: '', deviceName: 'レジ1' };
 
@@ -15,8 +15,22 @@ export type SyncResult = { ok: boolean; message: string };
 
 let running = false;
 
-/** GAS の Web アプリと同期する。未送信の売上を送り、商品マスタを全件受け取る */
-export async function syncNow(): Promise<SyncResult> {
+/** 同期のついでに受け取る、他の端末の取引の期間（今日を含む過去何日分か） */
+export const PULL_DAYS = 31;
+
+function pullRange() {
+  const t = new Date();
+  return {
+    start: new Date(t.getFullYear(), t.getMonth(), t.getDate() - (PULL_DAYS - 1)),
+    end: new Date(t.getFullYear(), t.getMonth(), t.getDate() + 1),
+  };
+}
+
+/**
+ * GAS の Web アプリと同期する。未送信の売上を送り、商品マスタと販売場所を受け取る。
+ * pull が true なら、直近の全端末の取引も受け取る（会計直後の自動同期では通信を軽くするため受け取らない）。
+ */
+export async function syncNow(opts: { pull?: boolean } = {}): Promise<SyncResult> {
   if (running) return { ok: false, message: '同期中です' };
   const settings = await loadSettings();
   if (!settings.gasUrl) return { ok: false, message: '設定画面で同期先URLを登録してください' };
@@ -34,6 +48,7 @@ export async function syncNow(): Promise<SyncResult> {
         token: settings.token,
         device: settings.deviceName,
         sales: unsent.map(({ synced: _s, ...rest }) => rest),
+        pull: opts.pull ? { start: pullRange().start.toISOString(), end: pullRange().end.toISOString() } : undefined,
       }),
       signal: controller.signal,
     });
@@ -44,7 +59,7 @@ export async function syncNow(): Promise<SyncResult> {
     const savedIds: string[] = Array.isArray(data.savedIds) ? data.savedIds : [];
     const products = sanitizeProducts(data.products);
 
-    await db.transaction('rw', db.sales, db.products, db.meta, async () => {
+    await db.transaction('rw', db.sales, db.products, db.meta, db.remoteSales, async () => {
       // 送信中に修正・取消された売上は、送った時点の内容と変わっているので未送信のまま残す
       for (const s of unsent) {
         if (!savedIds.includes(s.id)) continue;
@@ -56,13 +71,20 @@ export async function syncNow(): Promise<SyncResult> {
         await db.products.bulkPut(products);
         await setMeta('lastMasterAt', new Date().toISOString());
       }
+      if (Array.isArray(data.locations)) {
+        await setMeta('locations', data.locations.map(String).filter((x: string) => x.trim()));
+      }
+      if (data.pulled && Array.isArray(data.pulled.sales)) {
+        await storeRemoteSales(new Date(data.pulled.start), new Date(data.pulled.end), data.pulled.sales);
+      }
       await setMeta('lastSyncAt', new Date().toISOString());
     });
 
     const sent = savedIds.length;
+    const old = opts.pull && !data.pulled ? '。GASのスクリプトが古いため、他の端末の売上は受け取れませんでした' : '';
     return {
       ok: true,
-      message: `同期しました（売上 ${sent}件送信・商品 ${products.length}件）`,
+      message: `同期しました（売上 ${sent}件送信・商品 ${products.length}件）${old}`,
     };
   } catch (e) {
     if ((e as Error).name === 'AbortError') return { ok: false, message: '時間切れになりました。電波の良い場所でもう一度お試しください' };
@@ -142,42 +164,52 @@ export async function saveProductsRemote(upserts: Product[], deletes: string[] =
   }
 }
 
-export type RemoteSummary = { data: SummaryData; fetchedAt: string };
-
-/** 全端末の集計を、取得した日時と一緒にこの端末に保存しておく（オフラインでも前回の結果を見られるように） */
-const summaryKey = (start: Date) => `summary:${start.toISOString()}`;
-
-export async function loadSavedSummary(start: Date, end: Date): Promise<RemoteSummary | null> {
-  const saved = await getMeta<(RemoteSummary & { end: string }) | null>(summaryKey(start), null);
-  return saved && saved.end === end.toISOString() ? saved : null;
+/** 受け取った他の端末の取引を、その期間の分だけ入れ替えて保存する */
+async function storeRemoteSales(start: Date, end: Date, raw: unknown[]) {
+  const rows: RemoteSale[] = raw
+    .filter((r): r is Record<string, unknown> => !!r && typeof r === 'object' && typeof (r as { id?: unknown }).id === 'string')
+    .map((r) => ({
+      id: String(r.id),
+      createdAt: String(r.createdAt),
+      device: String(r.device ?? ''),
+      method: r.method === 'paypay' ? 'paypay' : 'cash',
+      total: Number(r.total) || 0,
+      received: Number(r.received) || 0,
+      change: Number(r.change) || 0,
+      voided: r.voided === true,
+      editedAt: typeof r.editedAt === 'string' ? r.editedAt : undefined,
+      location: String(r.location ?? ''),
+      items: Array.isArray(r.items) ? (r.items as RemoteSale['items']) : [],
+    }));
+  await db.remoteSales.where('createdAt').between(start.toISOString(), end.toISOString(), true, false).delete();
+  await db.remoteSales.bulkPut(rows);
+  await setMeta('remotePulledAt', new Date().toISOString());
 }
 
-/** 集計画面の「全端末の売上を取得」ボタン：GAS に期間を渡して、スプレッドシート上の全端末の売上を集計してもらう */
-export async function fetchSummaryRemote(
-  start: Date,
-  end: Date,
-): Promise<{ ok: true; summary: RemoteSummary } | { ok: false; message: string }> {
+/** 履歴・集計の「全端末の売上を取得」ボタン：表示中の期間の全端末の取引を受け取る */
+export async function fetchRemoteSales(start: Date, end: Date): Promise<SyncResult> {
   const settings = await loadSettings();
   if (!settings.gasUrl) return { ok: false, message: '設定画面で同期先URLを登録してください' };
   if (!navigator.onLine) return { ok: false, message: 'インターネットにつながっているときに取得できます' };
+  // 先にこの端末の未送信分を送っておくと、取得結果とこの端末の内容が揃う
+  await syncNow();
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 45000);
   try {
     const res = await fetch(settings.gasUrl, {
       method: 'POST',
-      body: JSON.stringify({ token: settings.token, action: 'summary', start: start.toISOString(), end: end.toISOString() }),
+      body: JSON.stringify({ token: settings.token, action: 'listSales', start: start.toISOString(), end: end.toISOString() }),
       signal: controller.signal,
     });
     if (!res.ok) return { ok: false, message: `通信エラー (${res.status})` };
     const data = await res.json();
     if (!data.ok) return { ok: false, message: data.error ?? '取得できませんでした' };
-    if (!data.applied || !data.summary) {
+    if (!data.applied || !Array.isArray(data.sales)) {
       return { ok: false, message: 'GASのスクリプトが古いため取得できません。最新のスクリプトに更新してください' };
     }
-    const summary: RemoteSummary = { data: data.summary as SummaryData, fetchedAt: new Date().toISOString() };
-    await setMeta(summaryKey(start), { ...summary, end: end.toISOString() });
-    return { ok: true, summary };
+    await db.transaction('rw', db.remoteSales, db.meta, () => storeRemoteSales(start, end, data.sales));
+    return { ok: true, message: `全端末の売上を取得しました（${data.sales.length}件）` };
   } catch (e) {
     if ((e as Error).name === 'AbortError') return { ok: false, message: '時間切れになりました。電波の良い場所でもう一度お試しください' };
     return { ok: false, message: '取得できませんでした。電波と設定を確認してください' };

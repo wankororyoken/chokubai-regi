@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { db, getMeta } from './db';
 import { HistoryScreen } from './HistoryScreen';
+import { LocationDialog } from './LocationDialog';
 import { PaymentScreen } from './PaymentScreen';
 import { PriceDialog } from './PriceDialog';
 import { ProductsScreen } from './ProductsScreen';
@@ -8,8 +9,9 @@ import { RegisterScreen } from './RegisterScreen';
 import { sampleProducts } from './sampleProducts';
 import { SettingsScreen } from './SettingsScreen';
 import { SummaryScreen } from './SummaryScreen';
+import { getCurrentLocation, setCurrentLocation } from './salesData';
 import { loadSettings, syncNow } from './sync';
-import type { CartLine, PayMethod, Product, Sale } from './types';
+import type { CartLine, CurrentLocation, PayMethod, Product, Sale } from './types';
 import { formatDateTime, formatTime, uid, yen } from './util';
 
 type Screen = 'register' | 'payment' | 'history' | 'summary' | 'settings' | 'products';
@@ -40,7 +42,10 @@ export default function App() {
   const [priceTarget, setPriceTarget] = useState<PriceTarget | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   /** 履歴から取引を修正中のとき：元の取引と、修正前に入力していた明細 */
-  const [editing, setEditing] = useState<{ sale: Sale; savedCart: CartLine[] } | null>(null);
+  const [editing, setEditing] = useState<{ sale: Sale; savedCart: CartLine[]; location: string } | null>(null);
+  /** レジで選んでいる販売場所（一度選ぶと、変えるまで次の会計にも引き継ぐ） */
+  const [location, setLocation] = useState<CurrentLocation | null>(null);
+  const [pickingLocation, setPickingLocation] = useState(false);
   const [toast, setToast] = useState<Toast | null>(null);
   const toastTimer = useRef<number>();
 
@@ -74,13 +79,13 @@ export default function App() {
   }, []);
 
   const runSync = useCallback(
-    async (manual: boolean) => {
+    async (manual: boolean, pull = true) => {
       if (!manual) {
         const s = await loadSettings();
         if (!s.gasUrl || !navigator.onLine) return;
       }
       setSyncing(true);
-      const r = await syncNow();
+      const r = await syncNow({ pull });
       setSyncing(false);
       if (r.ok) await reloadProducts();
       await refreshStatus();
@@ -94,6 +99,7 @@ export default function App() {
   useEffect(() => {
     navigator.storage?.persist?.().catch(() => undefined);
     reloadProducts();
+    getCurrentLocation().then(setLocation);
     refreshStatus().then(() => runSync(false));
     const on = () => {
       setOnline(true);
@@ -174,6 +180,7 @@ export default function App() {
         received,
         change: received - total,
         items,
+        location: editing.location,
         editedAt: new Date().toISOString(),
         rev: (orig.rev ?? 0) + 1,
         synced: 0,
@@ -197,6 +204,7 @@ export default function App() {
       change: received - total,
       voided: false,
       items,
+      location: location?.name ?? '',
       rev: 0,
       synced: 0,
     };
@@ -207,11 +215,12 @@ export default function App() {
       message: method === 'cash' ? `会計完了　おつり ${yen(sale.change)}` : `会計完了（PayPay ${yen(total)}）`,
     });
     refreshStatus();
-    if (navigator.onLine) runSync(false);
+    // 会計直後の自動同期は売上を送るだけ（他の端末の取引は受け取らず、通信を軽くする）
+    if (navigator.onLine) runSync(false, false);
   };
 
   const startEdit = (sale: Sale) => {
-    setEditing({ sale, savedCart: cart });
+    setEditing({ sale, savedCart: cart, location: sale.location ?? '' });
     setCart(
       sale.items.map((i) => ({
         key: uid(),
@@ -336,6 +345,9 @@ export default function App() {
             cart={cart}
             onTapProduct={onTapProduct}
             editingLabel={editing ? `${formatTime(editing.sale.createdAt)}の取引を修正中` : null}
+            locationName={editing ? editing.location : location?.name ?? ''}
+            locationSetAt={editing ? null : location?.setAt ?? null}
+            onPickLocation={() => setPickingLocation(true)}
             onCancelEdit={cancelEdit}
             onTapOther={() => setPriceTarget({ kind: 'other' })}
             onChangeQty={(key, d) =>
@@ -389,6 +401,25 @@ export default function App() {
       </main>
 
       {dialog}
+
+      {pickingLocation && (
+        <LocationDialog
+          current={editing ? editing.location : location?.name ?? ''}
+          editingLabel={editing ? `${formatTime(editing.sale.createdAt)}の取引` : null}
+          onCancel={() => setPickingLocation(false)}
+          onSelect={(name) => {
+            setPickingLocation(false);
+            if (editing) {
+              setEditing({ ...editing, location: name });
+              return;
+            }
+            const next = name ? { name, setAt: new Date().toISOString() } : null;
+            setLocation(next);
+            setCurrentLocation(next);
+            showToast({ message: name ? `販売場所を「${name}」にしました` : '販売場所を未設定にしました' });
+          }}
+        />
+      )}
 
       {confirmClear && (
         <div className="overlay" onClick={() => setConfirmClear(false)}>
