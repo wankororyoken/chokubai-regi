@@ -384,3 +384,39 @@ input { -webkit-user-select: text; user-select: text; }
   .history-items { white-space: normal; }
   .toast { bottom: calc(84px + env(safe-area-inset-bottom)); font-size: 15px; }
 }
+
+/* ===== 印刷（集計画面の「🖨 印刷」）：操作用の部品を消し、白黒でも読める報告書にする ===== */
+.print-only { display: none; }
+@media print {
+  @page { size: A4 portrait; margin: 12mm; }
+  html, body, #root, .app, .main, .page { height: auto !important; overflow: visible !important; background: #fff !important; }
+  .app { display: block; padding: 0; }
+  .page { max-width: none; padding: 0 !important; margin: 0; }
+  body { color: #000; font-size: 11pt; }
+  .header, .btn, .scope-switch, .fetch-panel, .mode-switch, .day-nav, .place-filter, .toast, .overlay, .page-head, .page > .muted, .bar { display: none !important; }
+  .print-only { display: block; }
+  .print-head h1 { font-size: 18pt; margin: 0 0 6pt; text-align: center; }
+  .print-info { width: 100%; border-collapse: collapse; font-size: 10.5pt; margin-bottom: 6pt; }
+  .print-info th, .print-info td { border: 1px solid #000; padding: 3pt 6pt; text-align: left; }
+  .print-info th { background: #eee; font-weight: 700; white-space: nowrap; width: 1%; }
+  .print-sign { display: flex; justify-content: flex-end; gap: 8pt; margin-bottom: 8pt; }
+  .print-sign span { border: 1px solid #000; width: 26mm; height: 18mm; font-size: 9pt; padding: 2pt 4pt; }
+  .summary { grid-template-columns: repeat(3, 1fr); gap: 6pt; margin-bottom: 6pt; }
+  .metric { border: 1px solid #000 !important; border-radius: 0; padding: 4pt 8pt; background: #fff !important; }
+  .metric strong { font-size: 15pt; }
+  .metric .muted { color: #000; }
+  .section-title { font-size: 12pt; margin: 10pt 0 4pt; border-left: 4pt solid #000; break-after: avoid; }
+  .sum-table { font-size: 10pt; border: 1px solid #000; border-radius: 0; }
+  .sum-table th { color: #000; font-weight: 700; background: #eee; border-bottom: 1px solid #000; padding: 3pt 6pt; }
+  .sum-table td { border-bottom: 1px solid #999; padding: 3pt 6pt; }
+  .sum-table tfoot td { background: #eee !important; border-top: 1px solid #000; }
+  .sum-table .col-split { display: table-cell !important; }
+  .sum-table tr { break-inside: avoid; }
+  .sum-table thead { display: table-header-group; }
+  .paypay-grid { display: block; }
+  .paypay-grid .sum-table { margin-bottom: 8pt; }
+  .device-name { color: #000; }
+  .muted, .empty { color: #000; }
+  .empty { padding: 4pt 0; text-align: left; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-shadow: none !important; }
+}

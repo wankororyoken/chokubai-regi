@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import { getMeta } from './db';
 import { RemotePanel, type Scope } from './RemotePanel';
+import { loadSettings } from './sync';
 import { loadSales, type ListedSale } from './salesData';
 import type { SummaryData } from './types';
-import { dayKey, formatTime, yen } from './util';
+import { dayKey, formatDateTime, formatTime, yen } from './util';
 
 type Props = { onBack: () => void };
 type Mode = 'day' | 'month';
@@ -87,7 +89,15 @@ export function SummaryScreen({ onBack }: Props) {
   const { start, end } = range(mode, base);
   const startKey = start.toISOString();
 
-  const load = async () => setSales(await loadSales(start, end, scope === 'all'));
+  const [deviceName, setDeviceName] = useState('');
+  const [pulledAt, setPulledAt] = useState<string | null>(null);
+  const load = async () => {
+    setSales(await loadSales(start, end, scope === 'all'));
+    setPulledAt(await getMeta<string | null>('remotePulledAt', null));
+  };
+  useEffect(() => {
+    loadSettings().then((st) => setDeviceName(st.deviceName));
+  }, []);
   useEffect(() => {
     load();
     // 期間（startKey）と表示する端末が変わったら読み直す
@@ -124,7 +134,40 @@ export function SummaryScreen({ onBack }: Props) {
           ← レジに戻る
         </button>
         <h1>集計</h1>
-        <span />
+        <button type="button" className="btn btn-sub" onClick={() => window.print()}>
+          🖨 印刷
+        </button>
+      </div>
+
+      {/* 印刷したときだけ出る見出し（事務への報告用） */}
+      <div className="print-only print-head">
+        <h1>売上報告</h1>
+        <table className="print-info">
+          <tbody>
+            <tr>
+              <th>期間</th>
+              <td>{mode === 'day' ? `${base.getFullYear()}年${label.replace('（今日）', '')}` : label.replace('（今月）', '')}</td>
+              <th>販売場所</th>
+              <td>{currentPlace === ALL ? 'すべての場所' : currentPlace || '場所なし'}</td>
+            </tr>
+            <tr>
+              <th>対象</th>
+              <td>{scope === 'all' ? '全端末' : `この端末（${deviceName}）だけ`}</td>
+              <th>出力日時</th>
+              <td>{formatDateTime(new Date().toISOString())}</td>
+            </tr>
+            {scope === 'all' && (
+              <tr>
+                <th>他の端末の売上</th>
+                <td colSpan={3}>{pulledAt ? `${formatDateTime(pulledAt)} に取得した内容` : '未取得（この端末の売上のみ）'}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        <div className="print-sign">
+          <span>報告者</span>
+          <span>確認者</span>
+        </div>
       </div>
 
       <RemotePanel scope={scope} onScope={setScope} start={start} end={end} onFetched={load} />
@@ -191,7 +234,7 @@ export function SummaryScreen({ onBack }: Props) {
         </div>
       )}
 
-      <p className="muted small">取消した取引は含みません。</p>
+      <p className="muted small">取消した取引は含みません。「🖨 印刷」では、今表示している期間・販売場所・端末の内容を印刷します。</p>
       <SummaryView data={data} mode={mode} showDevices={scope === 'all'} showLocations={currentPlace === ALL} />
     </div>
   );
